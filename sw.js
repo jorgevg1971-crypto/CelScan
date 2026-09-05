@@ -1,10 +1,10 @@
-const CACHE_NAME = 'docscan-v12';
+const CACHE_NAME = 'docscan-v13';
 const ASSETS = [
   './',
   './index.html',
-  './style.css',
-  './scanner-core.js',
-  './app.js',
+  './style.css?v=13',
+  './scanner-core.js?v=13',
+  './app.js?v=13',
   './manifest.json',
   './icon-192.png',
   './icon-512.png',
@@ -29,12 +29,12 @@ self.addEventListener('activate', (e) => {
   self.clients.claim();
 });
 
-// Network-First para código de la app para que siempre tenga las últimas mejoras
+// Network-First para siempre descargar la versión fresca
 self.addEventListener('fetch', (e) => {
   e.respondWith(
     fetch(e.request)
       .then((networkResponse) => {
-        if (networkResponse && networkResponse.status === 200) {
+        if (networkResponse && networkResponse.status === 200 && e.request.method === 'GET') {
           const resClone = networkResponse.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(e.request, resClone));
         }
