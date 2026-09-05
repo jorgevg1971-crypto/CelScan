@@ -195,32 +195,34 @@ document.addEventListener('DOMContentLoaded', () => {
       const rawCorners = ScannerCore.detectDocumentCorners(frameData);
 
       if (rawCorners && rawCorners.length === 4) {
-        // 1. Coordenadas de pantalla 1:1 exactas
-        const screenCorners = rawCorners.map(p => ({
-          x: (p.x / downW) * sW,
-          y: (p.y / downH) * sH
-        }));
-
-        // 2. Coordenadas de la foto original completa
-        const videoCorners = rawCorners.map(p => ({
+        // Coordenadas de video nativas de la captura
+        const currentVideoCorners = rawCorners.map(p => ({
           x: srcX + (p.x / downW) * srcW,
           y: srcY + (p.y / downH) * srcH
         }));
 
-        liveCorners = videoCorners;
-
-        // Suavizado EMA
+        // Suavizado EMA en coordenadas de video nativo
         if (!liveCornersSmoothed) {
-          liveCornersSmoothed = screenCorners.map(p => ({ x: p.x, y: p.y }));
+          liveCornersSmoothed = currentVideoCorners.map(p => ({ x: p.x, y: p.y }));
         } else {
-          const alpha = 0.55;
+          // Si el movimiento es grande, responder de inmediato; si es reposo, estabilizar
+          const totalDist = currentVideoCorners.reduce((acc, p, i) => {
+            return acc + Math.hypot(p.x - liveCornersSmoothed[i].x, p.y - liveCornersSmoothed[i].y);
+          }, 0);
+          const alpha = totalDist > 160 ? 0.85 : 0.45;
           for (let i = 0; i < 4; i++) {
-            liveCornersSmoothed[i].x = liveCornersSmoothed[i].x * (1 - alpha) + screenCorners[i].x * alpha;
-            liveCornersSmoothed[i].y = liveCornersSmoothed[i].y * (1 - alpha) + screenCorners[i].y * alpha;
+            liveCornersSmoothed[i].x = liveCornersSmoothed[i].x * (1 - alpha) + currentVideoCorners[i].x * alpha;
+            liveCornersSmoothed[i].y = liveCornersSmoothed[i].y * (1 - alpha) + currentVideoCorners[i].y * alpha;
           }
         }
 
-        renderLiveOverlay(liveCornersSmoothed);
+        // Mapear de video a coordenadas de pantalla para el overlay en vivo
+        const screenCorners = liveCornersSmoothed.map(p => ({
+          x: ((p.x - srcX) / srcW) * sW,
+          y: ((p.y - srcY) / srcH) * sH
+        }));
+
+        renderLiveOverlay(screenCorners);
         liveStatusPill.classList.add('detected');
         liveStatusText.innerText = '✓ Hoja encuadrada';
       } else {
@@ -310,7 +312,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const ctx = canvas.getContext('2d');
     ctx.drawImage(cameraFeed, 0, 0, canvas.width, canvas.height);
 
-    // Si ya teníamos el encuadre en tiempo real, usarlo directamente
+    // Si ya teníamos el encuadre en tiempo real en coordenadas de video nativo, usarlo directamente
     let initialCorners = null;
     if (liveCornersSmoothed && liveCornersSmoothed.length === 4) {
       initialCorners = liveCornersSmoothed.map(p => ({

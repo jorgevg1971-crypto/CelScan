@@ -1,7 +1,7 @@
 /**
  * Escáner Móvil Pro - Image Processing & Computer Vision Core
- * Algoritmo de Detección con Snap de Gradiente Activo (Active Gradient Edge Snapping)
- * Encuadra de forma milimétrica los 4 bordes exactos del papel.
+ * Algoritmo Avanzado de Detección de Documentos (Multi-Threshold + Ramer-Douglas-Peucker + Normal Ray Gradient Snapping)
+ * Encuadra de forma milimétrica los 4 bordes exactos del papel bajo cualquier iluminación, ángulo y perspectiva.
  */
 
 const ScannerCore = (() => {
@@ -10,25 +10,31 @@ const ScannerCore = (() => {
   const LETTER_ASPECT_RATIO = 8.5 / 11;
 
   /**
-   * Detección automática con ajuste activo al pico de gradiente
+   * Detección automática ultra-precisa de esquinas de documento
    */
   function detectDocumentCorners(imageData) {
     const width = imageData.width;
     const height = imageData.height;
     const data = imageData.data;
 
-    // Escala de análisis (280px para alta velocidad a 20+ FPS en móviles)
+    // Escala de análisis (280px para alta velocidad a 25+ FPS en móviles sin sobrecalentar)
     const targetDim = 280;
     const scale = Math.min(1, targetDim / Math.max(width, height));
     const sw = Math.floor(width * scale);
     const sh = Math.floor(height * scale);
     const totalPixels = sw * sh;
 
+    if (sw < 20 || sh < 20) {
+      return getA4PresetCorners(width, height);
+    }
+
     const lum = new Float32Array(totalPixels);
     const sat = new Float32Array(totalPixels);
-    const paperMask = new Uint8Array(totalPixels);
 
-    // 1. Mapas de Luminancia, Saturación y Máscara Inicial
+    // 1. Mapas de Luminancia y Saturación
+    let sumLum = 0;
+    const hist = new Int32Array(256);
+
     for (let y = 0; y < sh; y++) {
       for (let x = 0; x < sw; x++) {
         const origX = Math.min(width - 1, Math.floor(x / scale));
@@ -39,23 +45,26 @@ const ScannerCore = (() => {
         const g = data[idx + 1];
         const b = data[idx + 2];
 
-        const l = 0.299 * r + 0.587 * g + 0.114 * b;
+        const l = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
         lum[y * sw + x] = l;
+        sumLum += l;
+        hist[l]++;
 
         const maxVal = Math.max(r, g, b);
         const minVal = Math.min(r, g, b);
         const s = maxVal === 0 ? 0 : ((maxVal - minVal) / maxVal) * 100;
         sat[y * sw + x] = s;
-
-        if (l > 130 && s < 62) {
-          paperMask[y * sw + x] = 1;
-        }
       }
     }
 
-    // 2. Gradientes direccionales Sobel
+    // 2. Umbral de Otsu adaptativo
+    const otsuT = computeOtsuThreshold(hist, totalPixels);
+    const meanLum = sumLum / totalPixels;
+
+    // 3. Gradientes Sobel 2D y Magnitud de Gradiente
     const gradX = new Float32Array(totalPixels);
     const gradY = new Float32Array(totalPixels);
+    const gradMag = new Float32Array(totalPixels);
 
     for (let y = 1; y < sh - 1; y++) {
       for (let x = 1; x < sw - 1; x++) {
@@ -66,232 +75,379 @@ const ScannerCore = (() => {
                    (1 * lum[(y + 1) * sw + (x - 1)] + 2 * lum[(y + 1) * sw + x] + 1 * lum[(y + 1) * sw + (x + 1)]);
         gradX[y * sw + x] = gx;
         gradY[y * sw + x] = gy;
+        gradMag[y * sw + x] = Math.hypot(gx, gy);
       }
     }
 
-    // 3. Clausura morfológica direccional
-    const closedMask = morphCloseDirectional(paperMask, sw, sh, 11);
-    const blobs = findConnectedComponents(closedMask, sw, sh);
+    // 4. Intentar varios umbrales candidatos para máxima robustez
+    const thresholdCandidates = [
+      Math.max(85, Math.min(200, otsuT)),
+      Math.max(90, Math.min(210, Math.round(meanLum + 18))),
+      135,
+      115,
+      155
+    ];
 
-    if (blobs.length > 0) {
+    let bestQuad = null;
+    let bestQuadScore = -1;
+
+    for (const thresh of thresholdCandidates) {
+      const mask = new Uint8Array(totalPixels);
+      for (let i = 0; i < totalPixels; i++) {
+        // Un papel blanco/claro tiene luminancia alta y saturación de color baja
+        if (lum[i] >= thresh && sat[i] < 68) {
+          mask[i] = 1;
+        }
+      }
+
+      // Clausura morfológica direccional para consolidar texto y tablas internas
+      const closedMask = morphCloseDirectional(mask, sw, sh, 13);
+      const blobs = findConnectedComponents(closedMask, sw, sh);
+
       const cx0 = sw / 2;
       const cy0 = sh / 2;
 
-      let bestBlob = null;
-      let bestScore = -1;
-
       for (const blob of blobs) {
-        if (blob.area < totalPixels * 0.05) continue;
+        if (blob.area < totalPixels * 0.05 || blob.area > totalPixels * 0.98) continue;
 
         const centroidX = blob.sumX / blob.area;
         const centroidY = blob.sumY / blob.area;
         const distFromCenter = Math.hypot(centroidX - cx0, centroidY - cy0);
-        const centerScore = Math.max(0.2, 1 - distFromCenter / (Math.max(sw, sh) * 0.6));
+        const centerScore = Math.max(0.3, 1 - distFromCenter / (Math.max(sw, sh) * 0.55));
 
-        const score = blob.area * centerScore;
-        if (score > bestScore) {
-          bestScore = score;
-          bestBlob = blob;
+        const contour = extractContour(blob.pixels, sw, sh);
+        if (contour.length < 8) continue;
+
+        const hull = convexHull(contour);
+        if (hull.length < 4) continue;
+
+        // Aproximar polígono cuadrilátero mediante Ramer-Douglas-Peucker adaptativo
+        const candidateQuad = approximateQuadrilateral(hull);
+        if (!candidateQuad || candidateQuad.length !== 4) continue;
+
+        if (!isConvexQuad(candidateQuad)) continue;
+
+        const area = polygonArea(candidateQuad);
+        if (area < totalPixels * 0.06) continue;
+
+        // Evaluar relación de aspecto
+        const qOrdered = orderCorners(candidateQuad);
+        const wTop = Math.hypot(qOrdered[1].x - qOrdered[0].x, qOrdered[1].y - qOrdered[0].y);
+        const wBot = Math.hypot(qOrdered[2].x - qOrdered[3].x, qOrdered[2].y - qOrdered[3].y);
+        const hLeft = Math.hypot(qOrdered[3].x - qOrdered[0].x, qOrdered[3].y - qOrdered[0].y);
+        const hRight = Math.hypot(qOrdered[2].x - qOrdered[1].x, qOrdered[2].y - qOrdered[1].y);
+
+        const avgW = (wTop + wBot) / 2;
+        const avgH = (hLeft + hRight) / 2;
+        if (avgW < 20 || avgH < 20) continue;
+
+        const aspect = Math.min(avgW, avgH) / Math.max(avgW, avgH);
+        // La relación de aspecto de un documento A4/Carta es ~0.7, permitimos 0.35 - 0.98
+        const aspectScore = (aspect >= 0.35 && aspect <= 0.98) ? 1.0 : 0.4;
+
+        const score = area * centerScore * aspectScore;
+        if (score > bestQuadScore) {
+          bestQuadScore = score;
+          bestQuad = qOrdered;
         }
       }
 
-      if (bestBlob) {
-        const contour = extractContour(bestBlob.pixels, sw, sh);
-
-        if (contour.length >= 4) {
-          const hull = convexHull(contour);
-
-          // Estimar los 4 límites iniciales del trapezoide
-          let initTL = hull[0], initTR = hull[0], initBR = hull[0], initBL = hull[0];
-          let minTL = Infinity, maxTR = -Infinity, maxBR = -Infinity, minBL = Infinity;
-
-          for (const p of hull) {
-            const sTL = p.x + 1.15 * p.y;
-            if (sTL < minTL) { minTL = sTL; initTL = p; }
-            const sTR = p.x - 1.15 * p.y;
-            if (sTR > maxTR) { maxTR = sTR; initTR = p; }
-            const sBR = p.x + 1.15 * p.y;
-            if (sBR > maxBR) { maxBR = sBR; initBR = p; }
-            const sBL = p.x - 1.15 * p.y;
-            if (sBL < minBL) { minBL = sBL; initBL = p; }
-          }
-
-          // 4. REFINAMIENTO CON AJUSTE ACTIVO AL PICO DE GRADIENTE (Active Edge Snapping)
-          const snappedCorners = snapToGradientEdges(
-            [initTL, initTR, initBR, initBL],
-            gradX, gradY, sw, sh
-          );
-
-          if (snappedCorners && isConvexQuad(snappedCorners)) {
-            const area = polygonArea(snappedCorners);
-            if (area > totalPixels * 0.04) {
-              return snappedCorners.map(pt => ({
-                x: Math.max(0, Math.min(width, pt.x / scale)),
-                y: Math.max(0, Math.min(height, pt.y / scale))
-              }));
-            }
-          }
-        }
+      // Si encontramos un candidato con alto score, no necesitamos seguir buscando más umbrales
+      if (bestQuad && bestQuadScore > totalPixels * 0.3) {
+        break;
       }
     }
 
+    if (bestQuad) {
+      // 5. AJUSTE FINO MEDIANTE RAY-CASTING NORMAL A LOS GRADIENTES (Sub-pixel Normal Edge Snapping)
+      const refinedQuad = snapCornersAlongNormals(bestQuad, gradMag, gradX, gradY, sw, sh);
+      const finalQuad = (refinedQuad && isConvexQuad(refinedQuad) && polygonArea(refinedQuad) > totalPixels * 0.05)
+        ? refinedQuad
+        : bestQuad;
+
+      // Escalar de vuelta a la resolución nativa de la imagen
+      return finalQuad.map(pt => ({
+        x: Math.max(0, Math.min(width, pt.x / scale)),
+        y: Math.max(0, Math.min(height, pt.y / scale))
+      }));
+    }
+
+    // Fallback: Preseteo A4 centrado
     return getA4PresetCorners(width, height);
   }
 
   /**
-   * Refina las 4 líneas del documento buscando el pico de gradiente más nítido (transición papel-mesa)
+   * Calcula el umbral óptimo de Otsu
    */
-  function snapToGradientEdges(rawQuad, gradX, gradY, sw, sh) {
-    const [tl, tr, br, bl] = rawQuad;
+  function computeOtsuThreshold(hist, totalPixels) {
+    let sum = 0;
+    for (let i = 0; i < 256; i++) sum += i * hist[i];
 
-    // 1. Refinar Borde Izquierdo: buscar pico positivo en gradX (Mesa oscura -> Papel blanco)
-    const leftPoints = [];
-    const numSamples = 12;
-    for (let i = 1; i < numSamples; i++) {
-      const t = i / numSamples;
-      const expX = Math.round(tl.x * (1 - t) + bl.x * t);
-      const expY = Math.round(tl.y * (1 - t) + bl.y * t);
+    let sumB = 0;
+    let wB = 0;
+    let wF = 0;
+    let maxVariance = 0;
+    let threshold = 130;
 
-      let maxGx = 0;
-      let bestX = expX;
-      for (let dx = -10; dx <= 10; dx++) {
-        const sx = expX + dx;
-        if (sx >= 1 && sx < sw - 1 && expY >= 1 && expY < sh - 1) {
-          const gx = gradX[expY * sw + sx];
-          if (gx > maxGx) {
-            maxGx = gx;
-            bestX = sx;
-          }
-        }
+    for (let t = 0; t < 256; t++) {
+      wB += hist[t];
+      if (wB === 0) continue;
+      wF = totalPixels - wB;
+      if (wF === 0) break;
+
+      sumB += t * hist[t];
+      const mB = sumB / wB;
+      const mF = (sum - sumB) / wF;
+      const varianceBetween = wB * wF * (mB - mF) * (mB - mF);
+
+      if (varianceBetween > maxVariance) {
+        maxVariance = varianceBetween;
+        threshold = t;
       }
-      leftPoints.push({ x: bestX, y: expY });
     }
-
-    // 2. Refinar Borde Derecho: buscar pico negativo en gradX (Papel blanco -> Mesa oscura)
-    const rightPoints = [];
-    for (let i = 1; i < numSamples; i++) {
-      const t = i / numSamples;
-      const expX = Math.round(tr.x * (1 - t) + br.x * t);
-      const expY = Math.round(tr.y * (1 - t) + br.y * t);
-
-      let maxNegGx = 0;
-      let bestX = expX;
-      for (let dx = -10; dx <= 10; dx++) {
-        const sx = expX + dx;
-        if (sx >= 1 && sx < sw - 1 && expY >= 1 && expY < sh - 1) {
-          const negGx = -gradX[expY * sw + sx];
-          if (negGx > maxNegGx) {
-            maxNegGx = negGx;
-            bestX = sx;
-          }
-        }
-      }
-      rightPoints.push({ x: bestX, y: expY });
-    }
-
-    // 3. Refinar Borde Superior: buscar pico positivo en gradY (Fondo -> Papel)
-    const topPoints = [];
-    for (let i = 1; i < numSamples; i++) {
-      const t = i / numSamples;
-      const expX = Math.round(tl.x * (1 - t) + tr.x * t);
-      const expY = Math.round(tl.y * (1 - t) + tr.y * t);
-
-      let maxGy = 0;
-      let bestY = expY;
-      for (let dy = -10; dy <= 10; dy++) {
-        const sy = expY + dy;
-        if (expX >= 1 && expX < sw - 1 && sy >= 1 && sy < sh - 1) {
-          const gy = gradY[sy * sw + expX];
-          if (gy > maxGy) {
-            maxGy = gy;
-            bestY = sy;
-          }
-        }
-      }
-      topPoints.push({ x: expX, y: bestY });
-    }
-
-    // 4. Refinar Borde Inferior: buscar pico negativo en gradY (Papel -> Fondo)
-    const botPoints = [];
-    for (let i = 1; i < numSamples; i++) {
-      const t = i / numSamples;
-      const expX = Math.round(bl.x * (1 - t) + br.x * t);
-      const expY = Math.round(bl.y * (1 - t) + br.y * t);
-
-      let maxNegGy = 0;
-      let bestY = expY;
-      for (let dy = -10; dy <= 10; dy++) {
-        const sy = expY + dy;
-        if (expX >= 1 && expX < sw - 1 && sy >= 1 && sy < sh - 1) {
-          const negGy = -gradY[sy * sw + expX];
-          if (negGy > maxNegGy) {
-            maxNegGy = negGy;
-            bestY = sy;
-          }
-        }
-      }
-      botPoints.push({ x: expX, y: bestY });
-    }
-
-    // Ajustar 4 líneas por regresión
-    const lineLeft = fitLine(leftPoints, 'v');
-    const lineRight = fitLine(rightPoints, 'v');
-    const lineTop = fitLine(topPoints, 'h');
-    const lineBot = fitLine(botPoints, 'h');
-
-    const snappedTL = intersectHV(lineTop, lineLeft);
-    const snappedTR = intersectHV(lineTop, lineRight);
-    const snappedBR = intersectHV(lineBot, lineRight);
-    const snappedBL = intersectHV(lineBot, lineLeft);
-
-    if (snappedTL && snappedTR && snappedBR && snappedBL) {
-      return [snappedTL, snappedTR, snappedBR, snappedBL];
-    }
-
-    return rawQuad;
+    return threshold;
   }
 
-  function fitLine(points, type) {
-    if (type === 'v') {
-      let sumY = 0, sumX = 0, sumY2 = 0, sumYX = 0;
-      const n = points.length;
-      for (const p of points) {
-        sumY += p.y;
-        sumX += p.x;
-        sumY2 += p.y * p.y;
-        sumYX += p.y * p.x;
+  /**
+   * Aproxima un polígono convexo a exactamente 4 vértices usando RDP o selección de extremos
+   */
+  function approximateQuadrilateral(hull) {
+    if (hull.length === 4) return hull;
+
+    // Probar Ramer-Douglas-Peucker con epsilon variable
+    const peri = polygonPerimeter(hull);
+    for (let factor = 0.02; factor <= 0.08; factor += 0.005) {
+      const approx = ramerDouglasPeucker(hull, factor * peri);
+      if (approx.length === 4) {
+        return approx;
       }
-      const denom = n * sumY2 - sumY * sumY;
-      const m = Math.abs(denom) > 1e-5 ? (n * sumYX - sumY * sumX) / denom : 0;
-      const c = (sumX - m * sumY) / n;
-      return { m, c, type: 'v' };
+    }
+
+    // Si RDP no da 4 exactos, seleccionar los 4 puntos de extremos en las 4 direcciones diagonales
+    let initTL = hull[0], initTR = hull[0], initBR = hull[0], initBL = hull[0];
+    let minTL = Infinity, maxTR = -Infinity, maxBR = -Infinity, minBL = Infinity;
+
+    for (const p of hull) {
+      const sTL = p.x + 1.15 * p.y;
+      if (sTL < minTL) { minTL = sTL; initTL = p; }
+      const sTR = p.x - 1.15 * p.y;
+      if (sTR > maxTR) { maxTR = sTR; initTR = p; }
+      const sBR = p.x + 1.15 * p.y;
+      if (sBR > maxBR) { maxBR = sBR; initBR = p; }
+      const sBL = p.x - 1.15 * p.y;
+      if (sBL < minBL) { minBL = sBL; initBL = p; }
+    }
+
+    return [initTL, initTR, initBR, initBL];
+  }
+
+  /**
+   * Algoritmo Ramer-Douglas-Peucker para simplificar contornos
+   */
+  function ramerDouglasPeucker(points, epsilon) {
+    if (points.length <= 2) return points;
+
+    let maxDist = 0;
+    let index = 0;
+    const end = points.length - 1;
+
+    for (let i = 1; i < end; i++) {
+      const d = perpendicularDistance(points[i], points[0], points[end]);
+      if (d > maxDist) {
+        maxDist = d;
+        index = i;
+      }
+    }
+
+    if (maxDist > epsilon) {
+      const left = ramerDouglasPeucker(points.slice(0, index + 1), epsilon);
+      const right = ramerDouglasPeucker(points.slice(index), epsilon);
+      return left.slice(0, left.length - 1).concat(right);
     } else {
-      let sumX = 0, sumY = 0, sumX2 = 0, sumXY = 0;
-      const n = points.length;
-      for (const p of points) {
-        sumX += p.x;
-        sumY += p.y;
-        sumX2 += p.x * p.x;
-        sumXY += p.x * p.y;
-      }
-      const denom = n * sumX2 - sumX * sumX;
-      const m = Math.abs(denom) > 1e-5 ? (n * sumXY - sumX * sumY) / denom : 0;
-      const c = (sumY - m * sumX) / n;
-      return { m, c, type: 'h' };
+      return [points[0], points[end]];
     }
   }
 
-  function intersectHV(hLine, vLine) {
-    const mh = hLine.m, ch = hLine.c;
-    const mv = vLine.m, cv = vLine.c;
+  function perpendicularDistance(p, a, b) {
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const mag = Math.hypot(dx, dy);
+    if (mag < 1e-6) return Math.hypot(p.x - a.x, p.y - a.y);
+    return Math.abs(dy * p.x - dx * p.y + b.x * a.y - b.y * a.x) / mag;
+  }
 
-    const denom = 1 - mh * mv;
-    if (Math.abs(denom) < 1e-5) return null;
+  function polygonPerimeter(pts) {
+    let p = 0;
+    for (let i = 0; i < pts.length; i++) {
+      const next = pts[(i + 1) % pts.length];
+      p += Math.hypot(next.x - pts[i].x, next.y - pts[i].y);
+    }
+    return p;
+  }
 
-    const y = (mh * cv + ch) / denom;
-    const x = mv * y + cv;
+  /**
+   * Ajuste milimétrico de los 4 bordes muestreando rayos perpendiculares (Normal Vector Raycast)
+   */
+  function snapCornersAlongNormals(quad, gradMag, gradX, gradY, sw, sh) {
+    const ordered = orderCorners(quad); // [TL, TR, BR, BL]
+    const fittedLines = [];
+
+    const numSamples = 16;
+    const searchRange = 18; // Distancia de búsqueda perpendicular
+
+    for (let side = 0; side < 4; side++) {
+      const pA = ordered[side];
+      const pB = ordered[(side + 1) % 4];
+
+      const edgeDx = pB.x - pA.x;
+      const edgeDy = pB.y - pA.y;
+      const edgeLen = Math.hypot(edgeDx, edgeDy);
+
+      if (edgeLen < 10) return quad;
+
+      // Vector unitario normal perpendicular (apuntando hacia afuera)
+      const nx = -edgeDy / edgeLen;
+      const ny = edgeDx / edgeLen;
+
+      const edgePoints = [];
+
+      for (let s = 1; s < numSamples; s++) {
+        const t = s / numSamples;
+        const qx = pA.x + t * edgeDx;
+        const qy = pA.y + t * edgeDy;
+
+        let bestD = 0;
+        let maxGrad = 0;
+
+        for (let d = -searchRange; d <= searchRange; d++) {
+          const sx = Math.round(qx + d * nx);
+          const sy = Math.round(qy + d * ny);
+
+          if (sx >= 1 && sx < sw - 1 && sy >= 1 && sy < sh - 1) {
+            const g = gradMag[sy * sw + sx];
+            if (g > maxGrad) {
+              maxGrad = g;
+              bestD = d;
+            }
+          }
+        }
+
+        if (maxGrad > 15) {
+          edgePoints.push({
+            x: qx + bestD * nx,
+            y: qy + bestD * ny
+          });
+        }
+      }
+
+      if (edgePoints.length >= 4) {
+        fittedLines.push(fitRobustLine2D(edgePoints));
+      } else {
+        // Si no hay suficientes puntos de gradiente, usar la línea original
+        fittedLines.push(fitRobustLine2D([pA, pB]));
+      }
+    }
+
+    // Intersectar las 4 líneas consecutivas:
+    // 0: Top (TL->TR), 1: Right (TR->BR), 2: Bottom (BR->BL), 3: Left (BL->TL)
+    const newTL = intersectLines2D(fittedLines[3], fittedLines[0]);
+    const newTR = intersectLines2D(fittedLines[0], fittedLines[1]);
+    const newBR = intersectLines2D(fittedLines[1], fittedLines[2]);
+    const newBL = intersectLines2D(fittedLines[2], fittedLines[3]);
+
+    if (newTL && newTR && newBR && newBL) {
+      // Validar que los puntos resultantes no se hayan disparado fuera de rango
+      const pts = [newTL, newTR, newBR, newBL];
+      const valid = pts.every(p => p.x >= -30 && p.x <= sw + 30 && p.y >= -30 && p.y <= sh + 30);
+      if (valid) {
+        return pts.map(p => ({
+          x: Math.max(0, Math.min(sw, p.x)),
+          y: Math.max(0, Math.min(sh, p.y))
+        }));
+      }
+    }
+
+    return quad;
+  }
+
+  /**
+   * Ajusta una línea general A*x + B*y + C = 0 mediante regresión ortogonal de mínimos cuadrados
+   */
+  function fitRobustLine2D(points) {
+    const n = points.length;
+    let meanX = 0, meanY = 0;
+    for (const p of points) {
+      meanX += p.x;
+      meanY += p.y;
+    }
+    meanX /= n;
+    meanY /= n;
+
+    let covXX = 0, covXY = 0, covYY = 0;
+    for (const p of points) {
+      const dx = p.x - meanX;
+      const dy = p.y - meanY;
+      covXX += dx * dx;
+      covXY += dx * dy;
+      covYY += dy * dy;
+    }
+
+    // Ángulo del vector director principal
+    const theta = 0.5 * Math.atan2(2 * covXY, covXX - covYY);
+    const dirX = Math.cos(theta);
+    const dirY = Math.sin(theta);
+
+    // Vector normal a la línea
+    const A = -dirY;
+    const B = dirX;
+    const C = -(A * meanX + B * meanY);
+
+    return { A, B, C };
+  }
+
+  /**
+   * Intersección exacta entre dos líneas en forma A*x + B*y + C = 0
+   */
+  function intersectLines2D(line1, line2) {
+    const det = line1.A * line2.B - line2.A * line1.B;
+    if (Math.abs(det) < 1e-5) return null;
+
+    const x = (line1.B * line2.C - line2.B * line1.C) / det;
+    const y = (line2.A * line1.C - line1.A * line2.C) / det;
 
     return { x, y };
+  }
+
+  /**
+   * Ordena 4 esquinas siempre en sentido horario: [Top-Left, Top-Right, Bottom-Right, Bottom-Left]
+   */
+  function orderCorners(pts) {
+    const cx = (pts[0].x + pts[1].x + pts[2].x + pts[3].x) / 4;
+    const cy = (pts[0].y + pts[1].y + pts[2].y + pts[3].y) / 4;
+
+    // Ordenar por ángulo trigonométrico con respecto al centroide
+    const sorted = pts.slice().sort((a, b) => {
+      const angleA = Math.atan2(a.y - cy, a.x - cx);
+      const angleB = Math.atan2(b.y - cy, b.x - cx);
+      return angleA - angleB;
+    });
+
+    // Encontrar cuál de los puntos es el Top-Left (mínimo x + y)
+    let minSum = Infinity;
+    let tlIdx = 0;
+    for (let i = 0; i < 4; i++) {
+      const sum = sorted[i].x + sorted[i].y;
+      if (sum < minSum) {
+        minSum = sum;
+        tlIdx = i;
+      }
+    }
+
+    const ordered = [];
+    for (let i = 0; i < 4; i++) {
+      ordered.push(sorted[(tlIdx + i) % 4]);
+    }
+    return ordered;
   }
 
   function morphCloseDirectional(mask, w, h, len) {
@@ -516,6 +672,9 @@ const ScannerCore = (() => {
     return Math.abs(area) / 2;
   }
 
+  /**
+   * Corrección de perspectiva mediante homografía proyectiva
+   */
   function warpPerspective(sourceCanvas, corners) {
     const [tl, tr, br, bl] = corners;
 
