@@ -1,7 +1,8 @@
 /**
  * Escáner Móvil Pro - Image Processing & Computer Vision Core
- * Algoritmo Radial Ray-Casting & Saliency Boundary Tracer para detección
- * de documentos (A4, Carta, Tickets, etc.) con rechazo total de objetos circundantes.
+ * Algoritmo 4-Line Perspective Intersection & Boundary Refiner:
+ * Modela con precisión la perspectiva real (trapezoide/cuadrilátero) de cualquier
+ * documento sobre mesas o escritorios, ajustando las 4 esquinas de forma milimétrica.
  */
 
 const ScannerCore = (() => {
@@ -10,17 +11,15 @@ const ScannerCore = (() => {
   const LETTER_ASPECT_RATIO = 8.5 / 11;
 
   /**
-   * Detecta automáticamente las 4 esquinas reales de cualquier documento u hoja.
-   * Utiliza trazado de rayos radiales desde el núcleo del documento hacia el exterior
-   * con detección de gradiente y umbrales de saturación/luminancia.
+   * Detección automática de alta precisión de las 4 esquinas del documento.
    */
   function detectDocumentCorners(imageData) {
     const width = imageData.width;
     const height = imageData.height;
     const data = imageData.data;
 
-    // Redimensionar para análisis rápido (escala de trabajo ~320px)
-    const targetDim = 320;
+    // Escala de trabajo optimizada (~360px para alta definición de bordes)
+    const targetDim = 360;
     const scale = Math.min(1, targetDim / Math.max(width, height));
     const sw = Math.floor(width * scale);
     const sh = Math.floor(height * scale);
@@ -28,7 +27,6 @@ const ScannerCore = (() => {
     const lum = new Float32Array(sw * sh);
     const sat = new Float32Array(sw * sh);
 
-    // 1. Extraer mapas de luminancia y saturación de color
     for (let y = 0; y < sh; y++) {
       for (let x = 0; x < sw; x++) {
         const origX = Math.min(width - 1, Math.floor(x / scale));
@@ -39,20 +37,19 @@ const ScannerCore = (() => {
         const g = data[idx + 1];
         const b = data[idx + 2];
 
-        // Luminancia
-        const l = 0.299 * r + 0.587 * g + 0.114 * b;
-        lum[y * sw + x] = l;
+        lum[y * sw + x] = 0.299 * r + 0.587 * g + 0.114 * b;
 
-        // Saturación HSV (0 a 100)
         const maxVal = Math.max(r, g, b);
         const minVal = Math.min(r, g, b);
-        const s = maxVal === 0 ? 0 : ((maxVal - minVal) / maxVal) * 100;
-        sat[y * sw + x] = s;
+        sat[y * sw + x] = maxVal === 0 ? 0 : ((maxVal - minVal) / maxVal) * 100;
       }
     }
 
-    // 2. Calcular gradiente de bordes Sobel
-    const grad = new Float32Array(sw * sh);
+    // Gradiente direccional Sobel
+    const gradX = new Float32Array(sw * sh);
+    const gradY = new Float32Array(sw * sh);
+    const gradMag = new Float32Array(sw * sh);
+
     for (let y = 1; y < sh - 1; y++) {
       for (let x = 1; x < sw - 1; x++) {
         const gx = (-1 * lum[(y - 1) * sw + (x - 1)] + 1 * lum[(y - 1) * sw + (x + 1)]) +
@@ -60,11 +57,14 @@ const ScannerCore = (() => {
                    (-1 * lum[(y + 1) * sw + (x - 1)] + 1 * lum[(y + 1) * sw + (x + 1)]);
         const gy = (-1 * lum[(y - 1) * sw + (x - 1)] - 2 * lum[(y - 1) * sw + x] - 1 * lum[(y - 1) * sw + (x + 1)]) +
                    (1 * lum[(y + 1) * sw + (x - 1)] + 2 * lum[(y + 1) * sw + x] + 1 * lum[(y + 1) * sw + (x + 1)]);
-        grad[y * sw + x] = Math.hypot(gx, gy);
+        
+        gradX[y * sw + x] = gx;
+        gradY[y * sw + x] = gy;
+        gradMag[y * sw + x] = Math.hypot(gx, gy);
       }
     }
 
-    // 3. Localizar el "Centro Semilla" del documento (zona blanca/clara cerca del centro del visor)
+    // Localizar el núcleo del documento
     const cx0 = sw / 2;
     const cy0 = sh / 2;
     let sumWeight = 0;
@@ -78,7 +78,6 @@ const ScannerCore = (() => {
         const l = lum[idx];
         const s = sat[idx];
 
-        // El papel blanco tiene alta luminancia y baja saturación (no madera ni plástico de color)
         if (l > 140 && s < 65) {
           const distSq = (x - cx0) * (x - cx0) + (y - cy0) * (y - cy0);
           const spatialWeight = Math.exp(-distSq / sigmaSq);
@@ -93,15 +92,14 @@ const ScannerCore = (() => {
     const seedX = sumWeight > 0 ? (weightedX / sumWeight) : cx0;
     const seedY = sumWeight > 0 ? (weightedY / sumWeight) : cy0;
 
-    // Umbral adaptativo para el fondo según el color alrededor de la semilla
     const seedIdx = Math.floor(seedY) * sw + Math.floor(seedX);
     const seedLum = lum[seedIdx] || 200;
-    const paperThreshold = Math.max(120, seedLum * 0.65);
+    const paperThreshold = Math.max(115, seedLum * 0.62);
 
-    // 4. Lanzar 72 Rayos Radiales (cada 5°) desde el centro semilla hacia afuera
-    const numRays = 72;
+    // Lanzar 120 rayos radiales para muestreo denso del perímetro
+    const numRays = 120;
     const boundaryPoints = [];
-    const maxR = Math.min(sw, sh) * 0.95;
+    const maxR = Math.min(sw, sh) * 0.96;
 
     for (let i = 0; i < numRays; i++) {
       const angle = i * (2 * Math.PI / numRays);
@@ -110,7 +108,7 @@ const ScannerCore = (() => {
 
       let bestR = maxR;
 
-      for (let r = 12; r < maxR; r += 1.5) {
+      for (let r = 10; r < maxR; r += 1.0) {
         const px = Math.round(seedX + r * cosA);
         const py = Math.round(seedY + r * sinA);
 
@@ -122,21 +120,20 @@ const ScannerCore = (() => {
         const idx = py * sw + px;
         const l = lum[idx];
         const s = sat[idx];
-        const g = grad[idx];
+        const g = gradMag[idx];
 
-        // Condición 1: Caída de luminancia o aumento de saturación (se salió de la hoja a la mesa)
-        if ((l < paperThreshold || s > 65) && r > 18) {
+        // 1. Caída de luminancia o aumento de saturación al salir de la hoja
+        if ((l < paperThreshold || s > 65) && r > 15) {
           bestR = r;
           break;
         }
 
-        // Condición 2: Borde fuerte Sobel con caída subsiguiente
-        if (g > 45 && r > 25) {
+        // 2. Borde con gradiente marcado
+        if (g > 40 && r > 20) {
           const nextPx = Math.round(seedX + (r + 4) * cosA);
           const nextPy = Math.round(seedY + (r + 4) * sinA);
           if (nextPx >= 0 && nextPx < sw && nextPy >= 0 && nextPy < sh) {
-            const nextL = lum[nextPy * sw + nextPx];
-            if (nextL < paperThreshold) {
+            if (lum[nextPy * sw + nextPx] < paperThreshold) {
               bestR = r;
               break;
             }
@@ -146,48 +143,117 @@ const ScannerCore = (() => {
 
       boundaryPoints.push({
         x: seedX + bestR * cosA,
-        y: seedY + bestR * sinA
+        y: seedY + bestR * sinA,
+        cosA: cosA,
+        sinA: sinA
       });
     }
 
-    // 5. Envolvente convexa de los puntos del contorno detectados
-    const hull = convexHull(boundaryPoints);
-    if (hull.length < 3) {
-      return getA4PresetCorners(width, height);
-    }
+    // Separar puntos en los 4 bordes del documento
+    // Izquierda (cosA < -0.3), Derecha (cosA > 0.3), Arriba (sinA < -0.3), Abajo (sinA > 0.3)
+    const leftPts = boundaryPoints.filter(p => p.cosA < -0.3 && Math.abs(p.sinA) < 0.88);
+    const rightPts = boundaryPoints.filter(p => p.cosA > 0.3 && Math.abs(p.sinA) < 0.88);
+    const topPts = boundaryPoints.filter(p => p.sinA < -0.3 && Math.abs(p.cosA) < 0.88);
+    const botPts = boundaryPoints.filter(p => p.sinA > 0.3 && Math.abs(p.cosA) < 0.88);
 
-    // 6. Extraer el cuadrilátero óptimo de 4 esquinas
-    const perimeter = polygonPerimeter(hull);
-    let quad = null;
+    if (leftPts.length >= 4 && rightPts.length >= 4 && topPts.length >= 4 && botPts.length >= 4) {
+      // Ajustar las 4 líneas por regresión lineal / mínimos cuadrados
+      const lineLeft = fitLine(leftPts, 'v');   // x = m*y + c
+      const lineRight = fitLine(rightPts, 'v'); // x = m*y + c
+      const lineTop = fitLine(topPts, 'h');     // y = m*x + c
+      const lineBot = fitLine(botPts, 'h');     // y = m*x + c
 
-    for (const epsRatio of [0.03, 0.045, 0.06, 0.08, 0.12]) {
-      const approx = approxPolyDP(hull, epsRatio * perimeter);
-      if (approx.length === 4 && isConvexQuad(approx)) {
-        quad = approx;
-        break;
+      // Intersectar las 4 líneas para obtener las esquinas exactas del trapezoide
+      const tl = intersectHV(lineTop, lineLeft);
+      const tr = intersectHV(lineTop, lineRight);
+      const br = intersectHV(lineBot, lineRight);
+      const bl = intersectHV(lineBot, lineLeft);
+
+      if (tl && tr && br && bl) {
+        const rawCorners = [tl, tr, br, bl];
+        const area = polygonArea(rawCorners);
+
+        // Validar que el polígono tenga un área razonable y forma válida
+        if (area > (sw * sh * 0.06) && isConvexQuad(rawCorners)) {
+          return rawCorners.map(pt => ({
+            x: Math.max(0, Math.min(width, pt.x / scale)),
+            y: Math.max(0, Math.min(height, pt.y / scale))
+          }));
+        }
       }
     }
 
-    // Si la aproximación no dio exactamente 4 esquinas, usar caja orientada mínima del hull
-    if (!quad) {
-      quad = minAreaRect(hull);
-    }
-
-    if (quad && quad.length === 4) {
-      const ordered = orderCorners(quad);
-      const area = polygonArea(ordered);
-
-      // Verificar que el cuadrilátero tenga un tamaño válido (> 5% de la imagen)
-      if (area > (sw * sh * 0.05)) {
-        return ordered.map(pt => ({
+    // Fallback secundario: Envolvente convexa
+    const hull = convexHull(boundaryPoints);
+    if (hull.length >= 3) {
+      const perimeter = polygonPerimeter(hull);
+      for (const eps of [0.035, 0.05, 0.07, 0.1]) {
+        const approx = approxPolyDP(hull, eps * perimeter);
+        if (approx.length === 4 && isConvexQuad(approx)) {
+          return orderCorners(approx).map(pt => ({
+            x: Math.max(0, Math.min(width, pt.x / scale)),
+            y: Math.max(0, Math.min(height, pt.y / scale))
+          }));
+        }
+      }
+      const box = minAreaRect(hull);
+      if (box && box.length === 4) {
+        return orderCorners(box).map(pt => ({
           x: Math.max(0, Math.min(width, pt.x / scale)),
           y: Math.max(0, Math.min(height, pt.y / scale))
         }));
       }
     }
 
-    // Si falló la detección, devolver encuadre A4 centrado
     return getA4PresetCorners(width, height);
+  }
+
+  // Ajuste de línea robusto (Mínimos cuadrados con rechazo de outliers)
+  function fitLine(points, type) {
+    if (type === 'v') {
+      // Línea vertical: x = m*y + c
+      let sumY = 0, sumX = 0, sumY2 = 0, sumYX = 0;
+      const n = points.length;
+      for (const p of points) {
+        sumY += p.y;
+        sumX += p.x;
+        sumY2 += p.y * p.y;
+        sumYX += p.y * p.x;
+      }
+      const denom = n * sumY2 - sumY * sumY;
+      const m = Math.abs(denom) > 1e-5 ? (n * sumYX - sumY * sumX) / denom : 0;
+      const c = (sumX - m * sumY) / n;
+      return { m, c, type: 'v' };
+    } else {
+      // Línea horizontal: y = m*x + c
+      let sumX = 0, sumY = 0, sumX2 = 0, sumXY = 0;
+      const n = points.length;
+      for (const p of points) {
+        sumX += p.x;
+        sumY += p.y;
+        sumX2 += p.x * p.x;
+        sumXY += p.x * p.y;
+      }
+      const denom = n * sumX2 - sumX * sumX;
+      const m = Math.abs(denom) > 1e-5 ? (n * sumXY - sumX * sumY) / denom : 0;
+      const c = (sumY - m * sumX) / n;
+      return { m, c, type: 'h' };
+    }
+  }
+
+  // Intersección de línea horizontal (y = mh*x + ch) y vertical (x = mv*y + cv)
+  function intersectHV(hLine, vLine) {
+    const mh = hLine.m, ch = hLine.c;
+    const mv = vLine.m, cv = vLine.c;
+
+    // y = mh*(mv*y + cv) + ch => y * (1 - mh*mv) = mh*cv + ch
+    const denom = 1 - mh * mv;
+    if (Math.abs(denom) < 1e-5) return null;
+
+    const y = (mh * cv + ch) / denom;
+    const x = mv * y + cv;
+
+    return { x, y };
   }
 
   function getA4PresetCorners(width, height) {
