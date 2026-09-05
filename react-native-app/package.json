@@ -1,0 +1,26 @@
+{
+  "name": "scanner-mobil-pro",
+  "version": "1.0.0",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web"
+  },
+  "dependencies": {
+    "expo": "~51.0.0",
+    "expo-status-bar": "~1.12.1",
+    "react": "18.2.0",
+    "react-native": "0.74.1",
+    "expo-camera": "~15.0.13",
+    "expo-sharing": "~12.0.1",
+    "expo-file-system": "~17.0.1",
+    "expo-print": "~13.0.1",
+    "expo-image-manipulator": "~12.0.5",
+    "lucide-react-native": "^0.378.0"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.20.0"
+  },
+  "private": true
+}

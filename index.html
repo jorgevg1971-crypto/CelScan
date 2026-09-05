@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#1e293b">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="DocScan">
+  <title>Escáner Móvil Pro - Android & iPhone</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="style.css">
+  <!-- jsPDF for PDF generation -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+</head>
+<body>
+  <div id="app" class="app-container">
+    
+    <!-- HEADER -->
+    <header class="app-header">
+      <button id="btn-back" class="icon-btn hidden" title="Atrás">
+        <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none"><polyline points="15 18 9 12 15 6"></polyline></svg>
+      </button>
+      <div class="header-title-container">
+        <h1 id="header-title">Escáner Móvil Pro</h1>
+        <span id="header-subtitle" class="badge">Android & iOS</span>
+      </div>
+      <div class="header-actions">
+        <button id="btn-info" class="icon-btn" title="Información">
+          <svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- MAIN VIEWPORT / SCREENS -->
+    <main class="main-content">
+
+      <!-- SCREEN 1: CAMERA SCANNER -->
+      <section id="screen-camera" class="screen active">
+        <div class="camera-viewport">
+          <video id="camera-feed" playsinline autoplay muted></video>
+          <canvas id="camera-canvas" class="hidden"></canvas>
+          
+          <!-- Viewfinder Overlay with Document Guide -->
+          <div class="viewfinder-overlay">
+            <div class="doc-guide-frame">
+              <div class="corner-indicator tl"></div>
+              <div class="corner-indicator tr"></div>
+              <div class="corner-indicator bl"></div>
+              <div class="corner-indicator br"></div>
+              <div class="guide-text">Alinea el documento aquí</div>
+            </div>
+          </div>
+          
+          <!-- Flash / Torch & Switch Camera Buttons -->
+          <div class="camera-top-controls">
+            <button id="btn-torch" class="cam-small-btn" title="Linterna">
+              <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+            </button>
+            <button id="btn-switch-cam" class="cam-small-btn" title="Cambiar Cámara">
+              <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none"><path d="M20 10c0-4.418-3.582-8-8-8s-8 3.582-8 8c0 2.21 1.005 4.185 2.6 5.5L4 18h6v-6l-2.3 2.3C6.35 13.06 5.5 11.64 5.5 10c0-3.59 2.91-6.5 6.5-6.5s6.5 2.91 6.5 6.5c0 1.64-.85 3.06-2.2 4.3l1.4 1.4C18.995 14.185 20 12.21 20 10z"></path></svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Bottom Shutter & Gallery Controls -->
+        <div class="camera-bottom-controls">
+          <label for="gallery-input" class="action-circle-btn gallery-btn" title="Subir desde Galería">
+            <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+            <input type="file" id="gallery-input" accept="image/*" class="hidden">
+          </label>
+
+          <button id="btn-shutter" class="shutter-btn" title="Escanear">
+            <div class="shutter-inner"></div>
+          </button>
+
+          <button id="btn-doc-list" class="action-circle-btn list-btn" title="Páginas escaneadas">
+            <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
+            <span id="badge-page-count" class="badge-count hidden">0</span>
+          </button>
+        </div>
+      </section>
+
+      <!-- SCREEN 2: CROP & PERSPECTIVE ADJUSTMENT (ENCUADRE Y RECORTE) -->
+      <section id="screen-crop" class="screen">
+        <div class="crop-header-banner">
+          <span>Ajusta las 4 esquinas del documento</span>
+          <button id="btn-auto-crop" class="btn-chip" title="Detección Automática">
+            <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+            Auto-Detectar
+          </button>
+        </div>
+
+        <div class="crop-canvas-wrapper" id="crop-wrapper">
+          <canvas id="crop-canvas"></canvas>
+          <!-- Loupe / Magnifier glass for fine tuning -->
+          <div id="loupe" class="loupe-preview hidden">
+            <canvas id="loupe-canvas" width="120" height="120"></canvas>
+            <div class="loupe-crosshair"></div>
+          </div>
+        </div>
+
+        <div class="crop-toolbar">
+          <button id="btn-rotate-crop" class="btn-secondary">
+            <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+            Rotar 90°
+          </button>
+          <button id="btn-full-crop" class="btn-secondary">
+            <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>
+            Todo
+          </button>
+          <button id="btn-apply-crop" class="btn-primary">
+            Siguiente
+            <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none"><polyline points="9 18 15 12 9 6"></polyline></svg>
+          </button>
+        </div>
+      </section>
+
+      <!-- SCREEN 3: ENHANCEMENT, FOCUS & FILTERS (ENFOQUE Y FILTROS) -->
+      <section id="screen-filter" class="screen">
+        <div class="filter-preview-wrapper">
+          <canvas id="filter-canvas"></canvas>
+        </div>
+
+        <!-- Filter Presets Tabs -->
+        <div class="filter-presets-bar">
+          <button class="preset-btn active" data-filter="magic">
+            <span class="preset-icon magic-icon">✨</span>
+            <span class="preset-label">Color Nítido</span>
+          </button>
+          <button class="preset-btn" data-filter="bw">
+            <span class="preset-icon bw-icon">📄</span>
+            <span class="preset-label">B/N Documento</span>
+          </button>
+          <button class="preset-btn" data-filter="grayscale">
+            <span class="preset-icon gray-icon">🌓</span>
+            <span class="preset-label">Grises</span>
+          </button>
+          <button class="preset-btn" data-filter="original">
+            <span class="preset-icon orig-icon">🖼️</span>
+            <span class="preset-label">Original</span>
+          </button>
+        </div>
+
+        <!-- Manual Sliders (Focus/Sharpness, Contrast, Brightness) -->
+        <div class="sliders-card">
+          <div class="slider-row">
+            <label for="slider-sharpness">
+              <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+              Enfoque / Nitidez
+            </label>
+            <input type="range" id="slider-sharpness" min="0" max="100" value="40">
+            <span id="val-sharpness" class="slider-val">40%</span>
+          </div>
+
+          <div class="slider-row">
+            <label for="slider-contrast">
+              <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="10"></circle><path d="M12 2a10 10 0 0 1 0 20z" fill="currentColor"></path></svg>
+              Contraste
+            </label>
+            <input type="range" id="slider-contrast" min="50" max="200" value="125">
+            <span id="val-contrast" class="slider-val">125%</span>
+          </div>
+
+          <div class="slider-row">
+            <label for="slider-brightness">
+              <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
+              Brillo
+            </label>
+            <input type="range" id="slider-brightness" min="-50" max="50" value="10">
+            <span id="val-brightness" class="slider-val">+10</span>
+          </div>
+        </div>
+
+        <div class="filter-bottom-actions">
+          <button id="btn-add-more-pages" class="btn-secondary">
+            <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+            + Añadir Otra Página
+          </button>
+          <button id="btn-done-filter" class="btn-primary">
+            Finalizar y Guardar
+            <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none"><polyline points="20 6 9 17 4 12"></polyline></svg>
+          </button>
+        </div>
+      </section>
+
+      <!-- SCREEN 4: DOCUMENT PREVIEW & SHARE/SAVE OPTIONS (GUARDAR Y COMPARTIR) -->
+      <section id="screen-share" class="screen">
+        <div class="share-doc-preview-card">
+          <div class="doc-header-info">
+            <input type="text" id="doc-title-input" value="Documento_Escaneado" class="doc-title-field">
+            <span id="doc-pages-info" class="doc-pages-tag">1 Página(s)</span>
+          </div>
+
+          <div class="pages-carousel" id="pages-carousel">
+            <!-- Rendered scanned pages -->
+          </div>
+        </div>
+
+        <!-- SHARE & SAVE ACTION HUB -->
+        <div class="actions-hub-card">
+          <h2 class="section-title">¿Qué deseas hacer con tu documento?</h2>
+
+          <!-- PRIMARY ACTIONS: SAVE TO PHONE STORAGE -->
+          <div class="action-buttons-grid">
+            
+            <!-- GUARDAR EN MEMORIA (PDF) -->
+            <button id="btn-save-pdf" class="action-card-btn save-pdf">
+              <div class="action-icon-circle pdf-bg">
+                <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><path d="M9 15h6"></path><path d="M9 11h6"></path></svg>
+              </div>
+              <div class="action-text">
+                <span class="action-main-title">Guardar como PDF</span>
+                <span class="action-subtitle">En memoria del teléfono</span>
+              </div>
+              <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" class="chevron-icon"><polyline points="9 18 15 12 9 6"></polyline></svg>
+            </button>
+
+            <!-- GUARDAR EN MEMORIA (IMAGEN JPEG) -->
+            <button id="btn-save-img" class="action-card-btn save-img">
+              <div class="action-icon-circle img-bg">
+                <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+              </div>
+              <div class="action-text">
+                <span class="action-main-title">Guardar en Galería</span>
+                <span class="action-subtitle">Foto HD en tu almacenamiento</span>
+              </div>
+              <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" class="chevron-icon"><polyline points="9 18 15 12 9 6"></polyline></svg>
+            </button>
+
+            <!-- COMPARTIR POR WHATSAPP -->
+            <button id="btn-share-whatsapp" class="action-card-btn share-wa">
+              <div class="action-icon-circle wa-bg">
+                <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M12.04 2c-5.46 0-9.91 4.45-9.91 9.91 0 1.75.46 3.45 1.32 4.95L2.05 22l5.25-1.38c1.45.79 3.08 1.21 4.74 1.21 5.46 0 9.91-4.45 9.91-9.91 0-2.65-1.03-5.14-2.9-7.01A9.816 9.816 0 0 0 12.04 2zm5.8 14.16c-.24.68-1.4 1.25-1.92 1.33-.5.08-1.15.12-3.71-.94-3.28-1.36-5.4-4.68-5.56-4.9-.16-.22-1.33-1.77-1.33-3.38s.84-2.4 1.14-2.73c.3-.33.66-.41.88-.41.22 0 .44 0 .63.01.2.01.47-.08.73.56.27.68.91 2.22.99 2.38.08.16.14.36.03.58-.11.22-.16.36-.33.55-.16.19-.35.43-.5.58-.17.17-.35.35-.15.69.2.34.89 1.46 1.91 2.36 1.31 1.17 2.42 1.53 2.76 1.7.34.17.55.14.75-.09.21-.24.88-1.03 1.12-1.38.24-.35.48-.29.8-.17.33.12 2.08.98 2.44 1.16.36.18.6.27.69.42.09.15.09.87-.15 1.55z"></path></svg>
+              </div>
+              <div class="action-text">
+                <span class="action-main-title">Compartir por WhatsApp</span>
+                <span class="action-subtitle">Enviar PDF/Foto a tus contactos</span>
+              </div>
+              <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" class="chevron-icon"><polyline points="9 18 15 12 9 6"></polyline></svg>
+            </button>
+
+            <!-- COMPARTIR POR CORREO -->
+            <button id="btn-share-email" class="action-card-btn share-mail">
+              <div class="action-icon-circle mail-bg">
+                <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg>
+              </div>
+              <div class="action-text">
+                <span class="action-main-title">Compartir por Correo</span>
+                <span class="action-subtitle">Enviar por Gmail / Mail / Outlook</span>
+              </div>
+              <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" class="chevron-icon"><polyline points="9 18 15 12 9 6"></polyline></svg>
+            </button>
+
+            <!-- COMPARTIR MENÚ DEL SISTEMA (AirDrop, Bluetooth, etc.) -->
+            <button id="btn-share-system" class="action-card-btn share-sys">
+              <div class="action-icon-circle sys-bg">
+                <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
+              </div>
+              <div class="action-text">
+                <span class="action-main-title">Más Opciones de Compartir</span>
+                <span class="action-subtitle">AirDrop, Drive, Telegram, etc.</span>
+              </div>
+              <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" class="chevron-icon"><polyline points="9 18 15 12 9 6"></polyline></svg>
+            </button>
+
+          </div>
+        </div>
+
+        <div class="share-footer-bar">
+          <button id="btn-new-scan" class="btn-secondary w-full">
+            <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>
+            Escanear Nuevo Documento
+          </button>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- TOAST NOTIFICATION -->
+    <div id="toast" class="toast hidden">
+      <span id="toast-message">Operación exitosa</span>
+    </div>
+
+    <!-- MODAL INFO / PWA INSTALL -->
+    <div id="modal-info" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="modal-card">
+        <h3>📱 Escáner Móvil Pro</h3>
+        <p>Aplicación multiplataforma para <strong>Android</strong> e <strong>iPhone</strong>.</p>
+        <div class="info-list">
+          <div class="info-item">📸 <strong>Cámara HD:</strong> Captura y encuadre guiado.</div>
+          <div class="info-item">📐 <strong>Auto-Recorte:</strong> Detección inteligente de bordes con 4 puntos interactivos y lupa.</div>
+          <div class="info-item">✨ <strong>Filtros y Enfoque:</strong> Blanco y Negro ultra claro, Color Nítido y control de nitidez.</div>
+          <div class="info-item">💾 <strong>Memoria:</strong> Descarga instantánea en PDF o imagen JPEG.</div>
+          <div class="info-item">📲 <strong>Compartir:</strong> WhatsApp, Correo, AirDrop y Share Sheet.</div>
+        </div>
+        <div class="pwa-tip">
+          💡 <strong>Tip iPhone (iOS):</strong> Pulsa "Compartir" en Safari y selecciona <em>"Añadir a pantalla de inicio"</em> para tenerla como app nativa.<br><br>
+          💡 <strong>Tip Android:</strong> Pulsa el menú de 3 puntos en Chrome y selecciona <em>"Instalar aplicación"</em>.
+        </div>
+        <button id="btn-close-modal" class="btn-primary w-full">Entendido</button>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="scanner-core.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
