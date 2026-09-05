@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-title" content="DocScan">
   <title>Escáner Móvil Pro - Android & iPhone</title>
   <link rel="manifest" href="manifest.json">
-  <link rel="stylesheet" href="style.css?v=13">
+  <link rel="stylesheet" href="style.css?v=14">
   <!-- jsPDF for PDF generation -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 </head>
@@ -23,7 +23,7 @@
       </button>
       <div class="header-title-container">
         <h1 id="header-title">Escáner Móvil Pro</h1>
-        <span id="header-subtitle" class="badge">v13 · Android & iOS</span>
+        <span id="header-subtitle" class="badge">v14 · Android & iOS</span>
       </div>
       <div class="header-actions">
         <button id="btn-info" class="icon-btn" title="Información">
@@ -336,24 +336,36 @@
 
     </main>
 
-    <!-- FULLSCREEN DOCUMENT PREVIEW & ZOOM MODAL -->
+    <!-- FULLSCREEN DOCUMENT PREVIEW & PAN-ZOOM MODAL -->
     <div id="modal-doc-preview" class="preview-modal hidden">
       <div class="preview-modal-backdrop" id="preview-modal-backdrop"></div>
       <div class="preview-modal-content">
         <div class="preview-modal-header">
           <span id="preview-modal-page-info">Página 1 de 1</span>
           <div class="preview-modal-actions">
-            <button id="btn-preview-zoom-toggle" class="modal-icon-btn" title="Alternar Zoom">
-              <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="11" y1="8" x2="11" y2="14"></line><line x1="8" y1="11" x2="14" y2="11"></line></svg>
+            <button id="btn-modal-zoom-out" class="modal-icon-btn" title="Alejar (-)">
+              <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2.5" fill="none"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="8" y1="11" x2="14" y2="11"></line></svg>
             </button>
-            <button id="btn-close-preview-modal" class="modal-icon-btn" title="Cerrar vista previa">
+            <button id="btn-modal-zoom-in" class="modal-icon-btn" title="Acercar (+)">
+              <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2.5" fill="none"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="11" y1="8" x2="11" y2="14"></line><line x1="8" y1="11" x2="14" y2="11"></line></svg>
+            </button>
+            <button id="btn-modal-zoom-reset" class="modal-icon-btn" title="Restablecer tamaño">
+              <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none"><path d="M15 3h6v6"></path><path d="M9 21H3v-6"></path><path d="M21 3l-7 7"></path><path d="M3 21l7-7"></path></svg>
+            </button>
+            <button id="btn-close-preview-modal" class="modal-icon-btn close-btn" title="Cerrar">
               <svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" stroke-width="2" fill="none"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
             </button>
           </div>
         </div>
 
+        <div class="modal-pan-tip">
+          👆 Arrastra con el dedo para moverte por toda la hoja · Doble toque para zoom
+        </div>
+
         <div class="preview-modal-viewport" id="preview-modal-viewport">
-          <img id="preview-modal-img" src="" alt="Documento ampliado">
+          <div class="preview-zoom-canvas-wrapper" id="preview-zoom-wrapper">
+            <img id="preview-modal-img" src="" alt="Documento ampliado">
+          </div>
         </div>
 
         <div class="preview-modal-footer">
@@ -362,7 +374,7 @@
             Re-escanear Hoja
           </button>
           <button id="btn-modal-ok" class="btn-primary">
-            ✓ Aceptar Calidad
+            ✓ Aceptar y Volver
           </button>
         </div>
       </div>
@@ -396,13 +408,13 @@
 
   </div>
 
-  <script src="scanner-core.js?v=13"></script>
-  <script src="app.js?v=13"></script>
+  <script src="scanner-core.js?v=14"></script>
+  <script src="app.js?v=14"></script>
   <script>
     if ('caches' in window) {
       caches.keys().then(keys => {
         keys.forEach(k => {
-          if (k !== 'docscan-v13') caches.delete(k);
+          if (k !== 'docscan-v14') caches.delete(k);
         });
       });
     }
@@ -410,7 +422,7 @@
       navigator.serviceWorker.getRegistrations().then(regs => {
         regs.forEach(r => r.update());
       });
-      navigator.serviceWorker.register('./sw.js?v=13').then(reg => {
+      navigator.serviceWorker.register('./sw.js?v=14').then(reg => {
         reg.update();
       }).catch(err => console.log('SW error:', err));
     }

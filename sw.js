@@ -1,10 +1,10 @@
-const CACHE_NAME = 'docscan-v13';
+const CACHE_NAME = 'docscan-v14';
 const ASSETS = [
   './',
   './index.html',
-  './style.css?v=13',
-  './scanner-core.js?v=13',
-  './app.js?v=13',
+  './style.css?v=14',
+  './scanner-core.js?v=14',
+  './app.js?v=14',
   './manifest.json',
   './icon-192.png',
   './icon-512.png',

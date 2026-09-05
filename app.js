@@ -69,7 +69,11 @@ document.addEventListener('DOMContentLoaded', () => {
   const previewModalBackdrop = document.getElementById('preview-modal-backdrop');
   const previewModalPageInfo = document.getElementById('preview-modal-page-info');
   const previewModalImg = document.getElementById('preview-modal-img');
-  const btnPreviewZoomToggle = document.getElementById('btn-preview-zoom-toggle');
+  const previewZoomWrapper = document.getElementById('preview-zoom-wrapper');
+  const previewModalViewport = document.getElementById('preview-modal-viewport');
+  const btnModalZoomIn = document.getElementById('btn-modal-zoom-in');
+  const btnModalZoomOut = document.getElementById('btn-modal-zoom-out');
+  const btnModalZoomReset = document.getElementById('btn-modal-zoom-reset');
   const btnClosePreviewModal = document.getElementById('btn-close-preview-modal');
   const btnModalRescan = document.getElementById('btn-modal-rescan');
   const btnModalOk = document.getElementById('btn-modal-ok');
@@ -841,6 +845,29 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // Estado de Pan & Zoom del Modal
+  let modalZoom = 1.0;
+  let modalPanX = 0;
+  let modalPanY = 0;
+  let isModalPanning = false;
+  let panStartX = 0;
+  let panStartY = 0;
+  let initialPinchDist = 0;
+  let initialPinchScale = 1;
+  let lastTapTime = 0;
+
+  function updateModalTransform() {
+    if (!previewZoomWrapper) return;
+    previewZoomWrapper.style.transform = `translate(${modalPanX}px, ${modalPanY}px) scale(${modalZoom})`;
+  }
+
+  function resetModalZoom() {
+    modalZoom = 1.0;
+    modalPanX = 0;
+    modalPanY = 0;
+    updateModalTransform();
+  }
+
   // Abrir Modal de Vista Previa en Pantalla Completa
   function openDocumentPreviewModal() {
     if (scannedPages.length === 0) return;
@@ -848,14 +875,14 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!page) return;
 
     previewModalImg.src = page.dataUrl;
-    previewModalImg.classList.remove('zoomed');
+    resetModalZoom();
     previewModalPageInfo.innerText = `Página ${activePreviewIndex + 1} de ${scannedPages.length}`;
     modalDocPreview.classList.remove('hidden');
   }
 
   function closeDocumentPreviewModal() {
     modalDocPreview.classList.add('hidden');
-    previewModalImg.classList.remove('zoomed');
+    resetModalZoom();
   }
 
   if (btnOpenPreview) {
@@ -874,16 +901,123 @@ document.addEventListener('DOMContentLoaded', () => {
     btnModalOk.addEventListener('click', closeDocumentPreviewModal);
   }
 
-  // Alternar zoom en modal
-  if (btnPreviewZoomToggle) {
-    btnPreviewZoomToggle.addEventListener('click', () => {
-      previewModalImg.classList.toggle('zoomed');
+  // Botones de Zoom
+  if (btnModalZoomIn) {
+    btnModalZoomIn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      modalZoom = Math.min(5.0, modalZoom + 0.5);
+      updateModalTransform();
     });
   }
-  if (previewModalImg) {
-    previewModalImg.addEventListener('click', () => {
-      previewModalImg.classList.toggle('zoomed');
+
+  if (btnModalZoomOut) {
+    btnModalZoomOut.addEventListener('click', (e) => {
+      e.stopPropagation();
+      modalZoom = Math.max(1.0, modalZoom - 0.5);
+      if (modalZoom === 1.0) {
+        modalPanX = 0;
+        modalPanY = 0;
+      }
+      updateModalTransform();
     });
+  }
+
+  if (btnModalZoomReset) {
+    btnModalZoomReset.addEventListener('click', (e) => {
+      e.stopPropagation();
+      resetModalZoom();
+    });
+  }
+
+  // GESTOS TÁCTILES Y ARRASTRE DE NAVEGACIÓN EN 2D (PAN & PINCH-ZOOM)
+  if (previewModalViewport) {
+    // Touch Start
+    previewModalViewport.addEventListener('touchstart', (e) => {
+      if (e.touches.length === 1) {
+        isModalPanning = true;
+        panStartX = e.touches[0].clientX - modalPanX;
+        panStartY = e.touches[0].clientY - modalPanY;
+
+        // Detección de doble toque para zoom rápido
+        const now = Date.now();
+        if (now - lastTapTime < 300) {
+          if (modalZoom > 1.2) {
+            resetModalZoom();
+          } else {
+            modalZoom = 2.4;
+            modalPanX = 0;
+            modalPanY = 0;
+            updateModalTransform();
+          }
+          lastTapTime = 0;
+        } else {
+          lastTapTime = now;
+        }
+      } else if (e.touches.length === 2) {
+        isModalPanning = false;
+        initialPinchDist = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX,
+          e.touches[0].clientY - e.touches[1].clientY
+        );
+        initialPinchScale = modalZoom;
+      }
+    }, { passive: false });
+
+    // Touch Move
+    previewModalViewport.addEventListener('touchmove', (e) => {
+      e.preventDefault();
+      if (e.touches.length === 1 && isModalPanning) {
+        modalPanX = e.touches[0].clientX - panStartX;
+        modalPanY = e.touches[0].clientY - panStartY;
+        updateModalTransform();
+      } else if (e.touches.length === 2 && initialPinchDist > 0) {
+        const currentDist = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX,
+          e.touches[0].clientY - e.touches[1].clientY
+        );
+        modalZoom = Math.max(1.0, Math.min(5.0, initialPinchScale * (currentDist / initialPinchDist)));
+        updateModalTransform();
+      }
+    }, { passive: false });
+
+    // Touch End
+    previewModalViewport.addEventListener('touchend', (e) => {
+      if (e.touches.length === 0) {
+        isModalPanning = false;
+        initialPinchDist = 0;
+      } else if (e.touches.length === 1) {
+        isModalPanning = true;
+        panStartX = e.touches[0].clientX - modalPanX;
+        panStartY = e.touches[0].clientY - modalPanY;
+      }
+    });
+
+    // Mouse Drag (Desktop)
+    previewModalViewport.addEventListener('mousedown', (e) => {
+      isModalPanning = true;
+      panStartX = e.clientX - modalPanX;
+      panStartY = e.clientY - modalPanY;
+    });
+
+    window.addEventListener('mousemove', (e) => {
+      if (isModalPanning && modalDocPreview && !modalDocPreview.classList.contains('hidden')) {
+        modalPanX = e.clientX - panStartX;
+        modalPanY = e.clientY - panStartY;
+        updateModalTransform();
+      }
+    });
+
+    window.addEventListener('mouseup', () => {
+      isModalPanning = false;
+    });
+
+    // Mouse Wheel Zoom
+    previewModalViewport.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const zoomFactor = e.deltaY < 0 ? 1.15 : 0.85;
+      modalZoom = Math.max(1.0, Math.min(5.0, modalZoom * zoomFactor));
+      updateModalTransform();
+    }, { passive: false });
   }
 
   // Re-escanear página actual desde la pantalla de compartir o el modal
