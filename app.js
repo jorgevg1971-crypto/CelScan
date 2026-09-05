@@ -48,6 +48,11 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnAddMorePages = document.getElementById('btn-add-more-pages');
   const btnDoneFilter = document.getElementById('btn-done-filter');
 
+  // Live camera overlay elements
+  const liveOverlayCanvas = document.getElementById('live-overlay-canvas');
+  const liveStatusPill = document.getElementById('live-status-pill');
+  const liveStatusText = document.getElementById('live-status-text');
+
   // Share Screen Elements
   const docTitleInput = document.getElementById('doc-title-input');
   const docPagesInfo = document.getElementById('doc-pages-info');
@@ -69,6 +74,13 @@ document.addEventListener('DOMContentLoaded', () => {
   let warpedCanvas = null;
   let activeScreen = 'camera';
   
+  // Live real-time tracking state
+  let liveTrackingActive = false;
+  let liveCorners = null;
+  let liveCornersSmoothed = null;
+  let liveTrackingTimer = null;
+  const liveOffscreenCanvas = document.createElement('canvas');
+
   // Crop state
   let cropCorners = []; // [{x, y}, {x, y}, {x, y}, {x, y}] (tl, tr, br, bl)
   let activeCornerIndex = -1;
@@ -108,16 +120,153 @@ document.addEventListener('DOMContentLoaded', () => {
       stream = await navigator.mediaDevices.getUserMedia(constraints);
       cameraFeed.srcObject = stream;
       await cameraFeed.play();
+      startLiveTracking();
     } catch (err) {
       console.warn('Error al abrir cámara con constraints avanzados, reintentando con básicos...', err);
       try {
         stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
         cameraFeed.srcObject = stream;
         await cameraFeed.play();
+        startLiveTracking();
       } catch (e) {
         showToast('Permiso de cámara no disponible. Usa el botón de galería 📁');
       }
     }
+  }
+
+  // ==========================================
+  // LIVE REAL-TIME DOCUMENT TRACKING
+  // ==========================================
+  function startLiveTracking() {
+    if (liveTrackingActive) return;
+    liveTrackingActive = true;
+    processLiveFrame();
+  }
+
+  function stopLiveTracking() {
+    liveTrackingActive = false;
+    if (liveTrackingTimer) {
+      cancelAnimationFrame(liveTrackingTimer);
+      liveTrackingTimer = null;
+    }
+    const ctx = liveOverlayCanvas.getContext('2d');
+    ctx.clearRect(0, 0, liveOverlayCanvas.width, liveOverlayCanvas.height);
+  }
+
+  function processLiveFrame() {
+    if (!liveTrackingActive || activeScreen !== 'camera') return;
+
+    if (cameraFeed.videoWidth && cameraFeed.videoHeight) {
+      // Ajustar dimensiones del canvas overlay al tamaño visible
+      const rect = cameraFeed.getBoundingClientRect();
+      if (liveOverlayCanvas.width !== rect.width || liveOverlayCanvas.height !== rect.height) {
+        liveOverlayCanvas.width = rect.width;
+        liveOverlayCanvas.height = rect.height;
+      }
+
+      // Procesar frame en resolución reducida (máx 240px para 20+ FPS)
+      const downW = 240;
+      const downH = Math.round((cameraFeed.videoHeight / cameraFeed.videoWidth) * downW);
+      liveOffscreenCanvas.width = downW;
+      liveOffscreenCanvas.height = downH;
+      const offCtx = liveOffscreenCanvas.getContext('2d');
+      offCtx.drawImage(cameraFeed, 0, 0, downW, downH);
+
+      const frameData = offCtx.getImageData(0, 0, downW, downH);
+      const rawCorners = ScannerCore.detectDocumentCorners(frameData);
+
+      if (rawCorners && rawCorners.length === 4) {
+        // Escalar esquinas a coordenadas de la resolución completa de la cámara
+        const scaleX = cameraFeed.videoWidth / downW;
+        const scaleY = cameraFeed.videoHeight / downH;
+        const videoCorners = rawCorners.map(p => ({ x: p.x * scaleX, y: p.y * scaleY }));
+        liveCorners = videoCorners;
+
+        // Suavizado EMA (Exponential Moving Average) para movimiento fluido sin temblores
+        if (!liveCornersSmoothed) {
+          liveCornersSmoothed = videoCorners.map(p => ({ x: p.x, y: p.y }));
+        } else {
+          const alpha = 0.45;
+          for (let i = 0; i < 4; i++) {
+            liveCornersSmoothed[i].x = liveCornersSmoothed[i].x * (1 - alpha) + videoCorners[i].x * alpha;
+            liveCornersSmoothed[i].y = liveCornersSmoothed[i].y * (1 - alpha) + videoCorners[i].y * alpha;
+          }
+        }
+
+        renderLiveOverlay(liveCornersSmoothed);
+        liveStatusPill.classList.add('detected');
+        liveStatusText.innerText = '✓ Hoja encuadrada';
+      } else {
+        liveStatusPill.classList.remove('detected');
+        liveStatusText.innerText = 'Buscando documento...';
+      }
+    }
+
+    // Programar siguiente frame cada ~70ms (14 FPS)
+    setTimeout(() => {
+      if (liveTrackingActive) {
+        liveTrackingTimer = requestAnimationFrame(processLiveFrame);
+      }
+    }, 65);
+  }
+
+  function renderLiveOverlay(corners) {
+    const ctx = liveOverlayCanvas.getContext('2d');
+    const vw = liveOverlayCanvas.width;
+    const vh = liveOverlayCanvas.height;
+    ctx.clearRect(0, 0, vw, vh);
+
+    if (!corners || corners.length !== 4 || !cameraFeed.videoWidth) return;
+
+    // Mapear coordenadas de video a coordenadas de pantalla (object-fit: cover)
+    const videoW = cameraFeed.videoWidth;
+    const videoH = cameraFeed.videoHeight;
+    const videoAspect = videoW / videoH;
+    const screenAspect = vw / vh;
+
+    let renderW, renderH, offsetX, offsetY;
+    if (screenAspect > videoAspect) {
+      renderW = vw;
+      renderH = vw / videoAspect;
+      offsetX = 0;
+      offsetY = (vh - renderH) / 2;
+    } else {
+      renderH = vh;
+      renderW = vh * videoAspect;
+      offsetX = (vw - renderW) / 2;
+      offsetY = 0;
+    }
+
+    const screenPts = corners.map(p => ({
+      x: offsetX + (p.x / videoW) * renderW,
+      y: offsetY + (p.y / videoH) * renderH
+    }));
+
+    // Dibujar polígono semi-transparente en vivo
+    ctx.beginPath();
+    ctx.moveTo(screenPts[0].x, screenPts[0].y);
+    for (let i = 1; i < 4; i++) {
+      ctx.lineTo(screenPts[i].x, screenPts[i].y);
+    }
+    ctx.closePath();
+
+    ctx.fillStyle = 'rgba(56, 189, 248, 0.22)';
+    ctx.fill();
+
+    ctx.strokeStyle = '#38bdf8';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+
+    // Dibujar esquinas iluminadas
+    screenPts.forEach(pt => {
+      ctx.beginPath();
+      ctx.arc(pt.x, pt.y, 10, 0, Math.PI * 2);
+      ctx.fillStyle = '#38bdf8';
+      ctx.fill();
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+    });
   }
 
   async function toggleTorch() {
@@ -159,7 +308,17 @@ document.addEventListener('DOMContentLoaded', () => {
     const ctx = canvas.getContext('2d');
     ctx.drawImage(cameraFeed, 0, 0, canvas.width, canvas.height);
 
-    processCapturedImage(canvas);
+    // Si ya teníamos el encuadre en tiempo real, usarlo directamente
+    let initialCorners = null;
+    if (liveCornersSmoothed && liveCornersSmoothed.length === 4) {
+      initialCorners = liveCornersSmoothed.map(p => ({
+        x: Math.max(0, Math.min(canvas.width, p.x)),
+        y: Math.max(0, Math.min(canvas.height, p.y))
+      }));
+    }
+
+    stopLiveTracking();
+    processCapturedImage(canvas, initialCorners);
   }
 
   // Cargar imagen desde archivo/galería
@@ -176,6 +335,7 @@ document.addEventListener('DOMContentLoaded', () => {
         canvas.height = img.height;
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0);
+        stopLiveTracking();
         processCapturedImage(canvas);
       };
       img.src = event.target.result;
@@ -184,17 +344,20 @@ document.addEventListener('DOMContentLoaded', () => {
     galleryInput.value = '';
   });
 
-  function processCapturedImage(canvas) {
+  function processCapturedImage(canvas, presetCorners = null) {
     rawCapturedCanvas = canvas;
     
-    // Auto-detectar esquinas iniciales
-    const ctx = canvas.getContext('2d');
-    const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    cropCorners = ScannerCore.detectDocumentCorners(imgData);
+    if (presetCorners && presetCorners.length === 4) {
+      cropCorners = presetCorners;
+    } else {
+      const ctx = canvas.getContext('2d');
+      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      cropCorners = ScannerCore.detectDocumentCorners(imgData);
+    }
 
     goToScreen('crop');
     renderCropCanvas();
-    showToast('Encuadre y bordes detectados');
+    showToast('Encuadre detectado');
   }
 
   // ==========================================
@@ -209,19 +372,22 @@ document.addEventListener('DOMContentLoaded', () => {
       btnBack.classList.add('hidden');
       headerTitle.innerText = 'Escáner Móvil Pro';
       initCamera();
-    } else if (screenName === 'crop') {
-      screenCrop.classList.add('active');
-      btnBack.classList.remove('hidden');
-      headerTitle.innerText = 'Ajustar Encuadre';
-    } else if (screenName === 'filter') {
-      screenFilter.classList.add('active');
-      btnBack.classList.remove('hidden');
-      headerTitle.innerText = 'Filtros y Enfoque';
-    } else if (screenName === 'share') {
-      screenShare.classList.add('active');
-      btnBack.classList.remove('hidden');
-      headerTitle.innerText = 'Guardar y Compartir';
-      updateShareScreen();
+    } else {
+      stopLiveTracking();
+      if (screenName === 'crop') {
+        screenCrop.classList.add('active');
+        btnBack.classList.remove('hidden');
+        headerTitle.innerText = 'Ajustar Encuadre';
+      } else if (screenName === 'filter') {
+        screenFilter.classList.add('active');
+        btnBack.classList.remove('hidden');
+        headerTitle.innerText = 'Filtros y Enfoque';
+      } else if (screenName === 'share') {
+        screenShare.classList.add('active');
+        btnBack.classList.remove('hidden');
+        headerTitle.innerText = 'Guardar y Compartir';
+        updateShareScreen();
+      }
     }
   }
 

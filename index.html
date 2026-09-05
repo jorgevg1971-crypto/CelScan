@@ -39,16 +39,22 @@
       <section id="screen-camera" class="screen active">
         <div class="camera-viewport">
           <video id="camera-feed" playsinline autoplay muted></video>
+          <canvas id="live-overlay-canvas"></canvas>
           <canvas id="camera-canvas" class="hidden"></canvas>
           
+          <!-- Live Status Indicator -->
+          <div id="live-status-pill" class="live-status-pill">
+            <span class="live-dot"></span>
+            <span id="live-status-text">Buscando documento...</span>
+          </div>
+          
           <!-- Viewfinder Overlay with Document Guide -->
-          <div class="viewfinder-overlay">
+          <div class="viewfinder-overlay" id="viewfinder-overlay">
             <div class="doc-guide-frame">
               <div class="corner-indicator tl"></div>
               <div class="corner-indicator tr"></div>
               <div class="corner-indicator bl"></div>
               <div class="corner-indicator br"></div>
-              <div class="guide-text">Alinea el documento aquí</div>
             </div>
           </div>
           
@@ -313,11 +319,11 @@
 
   </div>
 
-  <script src="scanner-core.js?v=5"></script>
-  <script src="app.js?v=5"></script>
+  <script src="scanner-core.js?v=6"></script>
+  <script src="app.js?v=6"></script>
   <script>
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('./sw.js?v=5').then(reg => {
+      navigator.serviceWorker.register('./sw.js?v=6').then(reg => {
         reg.update();
       }).catch(err => console.log('SW error:', err));
     }
