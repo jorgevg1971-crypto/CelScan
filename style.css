@@ -175,14 +175,24 @@ body, html {
 
 .doc-guide-frame {
   width: 82%;
-  height: 75%;
+  aspect-ratio: 210 / 297; /* Proporción estándar A4 vertical */
+  max-height: 78%;
   position: relative;
-  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.52);
   border-radius: var(--radius-sm);
   display: flex;
   align-items: flex-end;
   justify-content: center;
-  padding-bottom: 24px;
+  padding-bottom: 18px;
+}
+
+@media (orientation: landscape) {
+  .doc-guide-frame {
+    height: 80%;
+    aspect-ratio: 297 / 210; /* Proporción A4 horizontal */
+    width: auto;
+    max-width: 85%;
+  }
 }
 
 .corner-indicator {
@@ -317,28 +327,42 @@ body, html {
 }
 
 .crop-header-banner {
-  padding: 10px 16px;
+  padding: 8px 12px;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   background: var(--bg-card);
   border-bottom: 1px solid var(--border-color);
   font-size: 13px;
   color: var(--text-secondary);
 }
 
+.crop-presets-chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .btn-chip {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  background: rgba(59, 130, 246, 0.18);
-  color: #60a5fa;
-  border: 1px solid rgba(59, 130, 246, 0.35);
-  padding: 5px 12px;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-secondary);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 5px 10px;
   border-radius: var(--radius-full);
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 600;
   cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-chip.active, .btn-chip:hover {
+  background: rgba(59, 130, 246, 0.25);
+  color: #60a5fa;
+  border-color: #3b82f6;
 }
 
 .crop-canvas-wrapper {

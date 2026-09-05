@@ -28,6 +28,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const cropCanvas = document.getElementById('crop-canvas');
   const cropWrapper = document.getElementById('crop-wrapper');
   const btnAutoCrop = document.getElementById('btn-auto-crop');
+  const btnA4Crop = document.getElementById('btn-a4-crop');
+  const btnLetterCrop = document.getElementById('btn-letter-crop');
   const btnRotateCrop = document.getElementById('btn-rotate-crop');
   const btnFullCrop = document.getElementById('btn-full-crop');
   const btnApplyCrop = document.getElementById('btn-apply-crop');
@@ -395,17 +397,42 @@ document.addEventListener('DOMContentLoaded', () => {
   window.addEventListener('touchend', handleEnd);
 
   // Botones de la barra de recorte
+  function setCropChipActive(btn) {
+    [btnAutoCrop, btnA4Crop, btnLetterCrop].forEach(b => {
+      if (b) b.classList.remove('active');
+    });
+    if (btn) btn.classList.add('active');
+  }
+
   btnAutoCrop.addEventListener('click', () => {
     if (!rawCapturedCanvas) return;
+    setCropChipActive(btnAutoCrop);
     const ctx = rawCapturedCanvas.getContext('2d');
     const imgData = ctx.getImageData(0, 0, rawCapturedCanvas.width, rawCapturedCanvas.height);
     cropCorners = ScannerCore.detectDocumentCorners(imgData);
     renderCropCanvas();
-    showToast('Encuadre re-calculado');
+    showToast('🪄 Detección inteligente de hoja');
+  });
+
+  btnA4Crop.addEventListener('click', () => {
+    if (!rawCapturedCanvas) return;
+    setCropChipActive(btnA4Crop);
+    cropCorners = ScannerCore.getA4PresetCorners(rawCapturedCanvas.width, rawCapturedCanvas.height);
+    renderCropCanvas();
+    showToast('📄 Encuadre A4 aplicado');
+  });
+
+  btnLetterCrop.addEventListener('click', () => {
+    if (!rawCapturedCanvas) return;
+    setCropChipActive(btnLetterCrop);
+    cropCorners = ScannerCore.getLetterPresetCorners(rawCapturedCanvas.width, rawCapturedCanvas.height);
+    renderCropCanvas();
+    showToast('📃 Encuadre Carta aplicado');
   });
 
   btnFullCrop.addEventListener('click', () => {
     if (!rawCapturedCanvas) return;
+    setCropChipActive(null);
     const w = rawCapturedCanvas.width;
     const h = rawCapturedCanvas.height;
     cropCorners = [
