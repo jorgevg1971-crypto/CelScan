@@ -54,10 +54,26 @@ document.addEventListener('DOMContentLoaded', () => {
   const liveStatusPill = document.getElementById('live-status-pill');
   const liveStatusText = document.getElementById('live-status-text');
 
-  // Share Screen Elements
+  // Share Screen & Featured Preview Elements
   const docTitleInput = document.getElementById('doc-title-input');
   const docPagesInfo = document.getElementById('doc-pages-info');
   const pagesCarousel = document.getElementById('pages-carousel');
+  const featuredPreviewImg = document.getElementById('featured-preview-img');
+  const btnOpenPreview = document.getElementById('btn-open-preview');
+  const btnQuickPreview = document.getElementById('btn-quick-preview');
+  const btnRescanCurrent = document.getElementById('btn-rescan-current');
+  const btnAddPageShare = document.getElementById('btn-add-page-share');
+
+  // Fullscreen Preview Modal Elements
+  const modalDocPreview = document.getElementById('modal-doc-preview');
+  const previewModalBackdrop = document.getElementById('preview-modal-backdrop');
+  const previewModalPageInfo = document.getElementById('preview-modal-page-info');
+  const previewModalImg = document.getElementById('preview-modal-img');
+  const btnPreviewZoomToggle = document.getElementById('btn-preview-zoom-toggle');
+  const btnClosePreviewModal = document.getElementById('btn-close-preview-modal');
+  const btnModalRescan = document.getElementById('btn-modal-rescan');
+  const btnModalOk = document.getElementById('btn-modal-ok');
+
   const btnSavePdf = document.getElementById('btn-save-pdf');
   const btnSaveImg = document.getElementById('btn-save-img');
   const btnShareWhatsapp = document.getElementById('btn-share-whatsapp');
@@ -74,6 +90,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let rawCapturedCanvas = null;
   let warpedCanvas = null;
   let activeScreen = 'camera';
+  let activePreviewIndex = 0;
   
   // Live real-time tracking state
   let liveTrackingActive = false;
@@ -756,20 +773,49 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // ==========================================
-  // DOCUMENT HUB: SHARE & SAVE
+  // DOCUMENT HUB: SHARE, PREVIEW & RE-SCAN
   // ==========================================
   function updateShareScreen() {
-    docPagesInfo.innerText = `${scannedPages.length} Página(s)`;
-    pagesCarousel.innerHTML = '';
+    if (scannedPages.length === 0) {
+      goToScreen('camera');
+      return;
+    }
 
+    docPagesInfo.innerText = `${scannedPages.length} Página(s)`;
+    
+    // Asegurar índice válido
+    if (activePreviewIndex >= scannedPages.length) {
+      activePreviewIndex = scannedPages.length - 1;
+    }
+    if (activePreviewIndex < 0) {
+      activePreviewIndex = 0;
+    }
+
+    // Actualizar imagen destacada de preview
+    const currentPage = scannedPages[activePreviewIndex];
+    if (featuredPreviewImg && currentPage) {
+      featuredPreviewImg.src = currentPage.dataUrl;
+    }
+
+    // Renderizar carrusel de páginas
+    pagesCarousel.innerHTML = '';
     scannedPages.forEach((page, index) => {
       const item = document.createElement('div');
-      item.className = 'page-thumb-item';
+      item.className = `page-thumb-item ${index === activePreviewIndex ? 'active' : ''}`;
       item.innerHTML = `
         <img src="${page.dataUrl}" alt="Pág ${index + 1}">
         <span class="page-thumb-num">#${index + 1}</span>
         <button class="page-thumb-del" data-idx="${index}" title="Eliminar">&times;</button>
       `;
+      
+      // Clic para cambiar página activa
+      item.addEventListener('click', (e) => {
+        if (!e.target.classList.contains('page-thumb-del')) {
+          activePreviewIndex = index;
+          updateShareScreen();
+        }
+      });
+
       pagesCarousel.appendChild(item);
     });
 
@@ -783,9 +829,83 @@ document.addEventListener('DOMContentLoaded', () => {
         if (scannedPages.length === 0) {
           goToScreen('camera');
         } else {
+          if (activePreviewIndex >= scannedPages.length) {
+            activePreviewIndex = scannedPages.length - 1;
+          }
           updateShareScreen();
+          showToast('Página eliminada');
         }
       });
+    });
+  }
+
+  // Abrir Modal de Vista Previa en Pantalla Completa
+  function openDocumentPreviewModal() {
+    if (scannedPages.length === 0) return;
+    const page = scannedPages[activePreviewIndex];
+    if (!page) return;
+
+    previewModalImg.src = page.dataUrl;
+    previewModalImg.classList.remove('zoomed');
+    previewModalPageInfo.innerText = `Página ${activePreviewIndex + 1} de ${scannedPages.length}`;
+    modalDocPreview.classList.remove('hidden');
+  }
+
+  function closeDocumentPreviewModal() {
+    modalDocPreview.classList.add('hidden');
+    previewModalImg.classList.remove('zoomed');
+  }
+
+  if (btnOpenPreview) {
+    btnOpenPreview.addEventListener('click', openDocumentPreviewModal);
+  }
+  if (btnQuickPreview) {
+    btnQuickPreview.addEventListener('click', openDocumentPreviewModal);
+  }
+  if (btnClosePreviewModal) {
+    btnClosePreviewModal.addEventListener('click', closeDocumentPreviewModal);
+  }
+  if (previewModalBackdrop) {
+    previewModalBackdrop.addEventListener('click', closeDocumentPreviewModal);
+  }
+  if (btnModalOk) {
+    btnModalOk.addEventListener('click', closeDocumentPreviewModal);
+  }
+
+  // Alternar zoom en modal
+  if (btnPreviewZoomToggle) {
+    btnPreviewZoomToggle.addEventListener('click', () => {
+      previewModalImg.classList.toggle('zoomed');
+    });
+  }
+  if (previewModalImg) {
+    previewModalImg.addEventListener('click', () => {
+      previewModalImg.classList.toggle('zoomed');
+    });
+  }
+
+  // Re-escanear página actual desde la pantalla de compartir o el modal
+  function rescanCurrentPage() {
+    if (scannedPages.length > 0) {
+      scannedPages.splice(activePreviewIndex, 1);
+      updatePageBadge();
+    }
+    closeDocumentPreviewModal();
+    showToast('Re-escaneando página...');
+    goToScreen('camera');
+  }
+
+  if (btnRescanCurrent) {
+    btnRescanCurrent.addEventListener('click', rescanCurrentPage);
+  }
+  if (btnModalRescan) {
+    btnModalRescan.addEventListener('click', rescanCurrentPage);
+  }
+
+  if (btnAddPageShare) {
+    btnAddPageShare.addEventListener('click', () => {
+      showToast('Añadiendo nueva página...');
+      goToScreen('camera');
     });
   }
 
