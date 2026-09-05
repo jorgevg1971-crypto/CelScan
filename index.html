@@ -313,7 +313,14 @@
 
   </div>
 
-  <script src="scanner-core.js"></script>
-  <script src="app.js"></script>
+  <script src="scanner-core.js?v=3"></script>
+  <script src="app.js?v=3"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('./sw.js?v=3').then(reg => {
+        reg.update();
+      }).catch(err => console.log('SW error:', err));
+    }
+  </script>
 </body>
 </html>

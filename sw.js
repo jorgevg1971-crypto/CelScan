@@ -1,4 +1,4 @@
-const CACHE_NAME = 'docscan-v1';
+const CACHE_NAME = 'docscan-v3';
 const ASSETS = [
   './',
   './index.html',
@@ -12,10 +12,10 @@ const ASSETS = [
 ];
 
 self.addEventListener('install', (e) => {
+  self.skipWaiting();
   e.waitUntil(
     caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS))
   );
-  self.skipWaiting();
 });
 
 self.addEventListener('activate', (e) => {
@@ -29,8 +29,17 @@ self.addEventListener('activate', (e) => {
   self.clients.claim();
 });
 
+// Network-First para código de la app para que siempre tenga las últimas mejoras
 self.addEventListener('fetch', (e) => {
   e.respondWith(
-    caches.match(e.request).then((res) => res || fetch(e.request))
+    fetch(e.request)
+      .then((networkResponse) => {
+        if (networkResponse && networkResponse.status === 200) {
+          const resClone = networkResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(e.request, resClone));
+        }
+        return networkResponse;
+      })
+      .catch(() => caches.match(e.request))
   );
 });
