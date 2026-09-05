@@ -1,8 +1,8 @@
 /**
  * Escáner Móvil Pro - Image Processing & Computer Vision Core
- * Algoritmo 4-Line Perspective Intersection & Boundary Refiner:
- * Modela con precisión la perspectiva real (trapezoide/cuadrilátero) de cualquier
- * documento sobre mesas o escritorios, ajustando las 4 esquinas de forma milimétrica.
+ * Algoritmo de Segmentación Morfológica y Extracción de Contorno de Documento:
+ * Detecta la hoja completa (desde el encabezado superior hasta el borde inferior),
+ * unificando texto, tablas, firmas y cuadrículas en un polígono continuo exacto.
  */
 
 const ScannerCore = (() => {
@@ -18,14 +18,15 @@ const ScannerCore = (() => {
     const height = imageData.height;
     const data = imageData.data;
 
-    // Escala de trabajo optimizada (~360px para alta definición de bordes)
-    const targetDim = 360;
+    // Escala de trabajo optimizada (~320px para procesamiento ultra-rápido en móviles)
+    const targetDim = 320;
     const scale = Math.min(1, targetDim / Math.max(width, height));
     const sw = Math.floor(width * scale);
     const sh = Math.floor(height * scale);
+    const totalPixels = sw * sh;
 
-    const lum = new Float32Array(sw * sh);
-    const sat = new Float32Array(sw * sh);
+    // 1. Crear máscara binaria de papel (Luminancia alta y Saturación baja)
+    const paperMask = new Uint8Array(totalPixels);
 
     for (let y = 0; y < sh; y++) {
       for (let x = 0; x < sw; x++) {
@@ -37,223 +38,203 @@ const ScannerCore = (() => {
         const g = data[idx + 1];
         const b = data[idx + 2];
 
-        lum[y * sw + x] = 0.299 * r + 0.587 * g + 0.114 * b;
+        // Luminancia percibida
+        const lum = 0.299 * r + 0.587 * g + 0.114 * b;
 
+        // Saturación HSV (0 a 100)
         const maxVal = Math.max(r, g, b);
         const minVal = Math.min(r, g, b);
-        sat[y * sw + x] = maxVal === 0 ? 0 : ((maxVal - minVal) / maxVal) * 100;
-      }
-    }
+        const sat = maxVal === 0 ? 0 : ((maxVal - minVal) / maxVal) * 100;
 
-    // Gradiente direccional Sobel
-    const gradX = new Float32Array(sw * sh);
-    const gradY = new Float32Array(sw * sh);
-    const gradMag = new Float32Array(sw * sh);
-
-    for (let y = 1; y < sh - 1; y++) {
-      for (let x = 1; x < sw - 1; x++) {
-        const gx = (-1 * lum[(y - 1) * sw + (x - 1)] + 1 * lum[(y - 1) * sw + (x + 1)]) +
-                   (-2 * lum[y * sw + (x - 1)] + 2 * lum[y * sw + (x + 1)]) +
-                   (-1 * lum[(y + 1) * sw + (x - 1)] + 1 * lum[(y + 1) * sw + (x + 1)]);
-        const gy = (-1 * lum[(y - 1) * sw + (x - 1)] - 2 * lum[(y - 1) * sw + x] - 1 * lum[(y - 1) * sw + (x + 1)]) +
-                   (1 * lum[(y + 1) * sw + (x - 1)] + 2 * lum[(y + 1) * sw + x] + 1 * lum[(y + 1) * sw + (x + 1)]);
-        
-        gradX[y * sw + x] = gx;
-        gradY[y * sw + x] = gy;
-        gradMag[y * sw + x] = Math.hypot(gx, gy);
-      }
-    }
-
-    // Localizar el núcleo del documento
-    const cx0 = sw / 2;
-    const cy0 = sh / 2;
-    let sumWeight = 0;
-    let weightedX = 0;
-    let weightedY = 0;
-    const sigmaSq = 2 * Math.pow(Math.min(sw, sh) * 0.35, 2);
-
-    for (let y = 0; y < sh; y++) {
-      for (let x = 0; x < sw; x++) {
-        const idx = y * sw + x;
-        const l = lum[idx];
-        const s = sat[idx];
-
-        if (l > 140 && s < 65) {
-          const distSq = (x - cx0) * (x - cx0) + (y - cy0) * (y - cy0);
-          const spatialWeight = Math.exp(-distSq / sigmaSq);
-          const weight = (l / 255) * spatialWeight;
-          sumWeight += weight;
-          weightedX += x * weight;
-          weightedY += y * weight;
+        // El papel blanco tiene luminancia > 130 y saturación < 65
+        if (lum > 130 && sat < 65) {
+          paperMask[y * sw + x] = 1;
         }
       }
     }
 
-    const seedX = sumWeight > 0 ? (weightedX / sumWeight) : cx0;
-    const seedY = sumWeight > 0 ? (weightedY / sumWeight) : cy0;
+    // 2. Clausura morfológica con radio amplio (11x11) para fusionar textos, tablas y firmas
+    const closedMask = morphClose(paperMask, sw, sh, 5);
 
-    const seedIdx = Math.floor(seedY) * sw + Math.floor(seedX);
-    const seedLum = lum[seedIdx] || 200;
-    const paperThreshold = Math.max(115, seedLum * 0.62);
+    // 3. Encontrar componentes conectados (Blobs)
+    const blobs = findConnectedComponents(closedMask, sw, sh);
 
-    // Lanzar 120 rayos radiales para muestreo denso del perímetro
-    const numRays = 120;
-    const boundaryPoints = [];
-    const maxR = Math.min(sw, sh) * 0.96;
+    if (blobs.length > 0) {
+      // Filtrar y ordenar blobs por proximidad al centro y área
+      const cx0 = sw / 2;
+      const cy0 = sh / 2;
 
-    for (let i = 0; i < numRays; i++) {
-      const angle = i * (2 * Math.PI / numRays);
-      const cosA = Math.cos(angle);
-      const sinA = Math.sin(angle);
+      let bestBlob = null;
+      let bestScore = -1;
 
-      let bestR = maxR;
+      for (const blob of blobs) {
+        // El documento debe ocupar al menos el 5% de la imagen
+        if (blob.area < totalPixels * 0.05) continue;
 
-      for (let r = 10; r < maxR; r += 1.0) {
-        const px = Math.round(seedX + r * cosA);
-        const py = Math.round(seedY + r * sinA);
+        // Centroide del blob
+        const centroidX = blob.sumX / blob.area;
+        const centroidY = blob.sumY / blob.area;
 
-        if (px < 2 || px >= sw - 2 || py < 2 || py >= sh - 2) {
-          bestR = r;
-          break;
+        // Bonificación por estar centrado en el visor del escáner
+        const distFromCenter = Math.hypot(centroidX - cx0, centroidY - cy0);
+        const centerScore = Math.max(0.2, 1 - distFromCenter / (Math.max(sw, sh) * 0.6));
+
+        const score = blob.area * centerScore;
+        if (score > bestScore) {
+          bestScore = score;
+          bestBlob = blob;
         }
+      }
 
-        const idx = py * sw + px;
-        const l = lum[idx];
-        const s = sat[idx];
-        const g = gradMag[idx];
+      if (bestBlob) {
+        // 4. Extraer contorno exterior del blob del documento
+        const contour = extractContour(bestBlob.pixels, sw, sh);
 
-        // 1. Caída de luminancia o aumento de saturación al salir de la hoja
-        if ((l < paperThreshold || s > 65) && r > 15) {
-          bestR = r;
-          break;
-        }
+        if (contour.length >= 4) {
+          // Envoltura convexa
+          const hull = convexHull(contour);
 
-        // 2. Borde con gradiente marcado
-        if (g > 40 && r > 20) {
-          const nextPx = Math.round(seedX + (r + 4) * cosA);
-          const nextPy = Math.round(seedY + (r + 4) * sinA);
-          if (nextPx >= 0 && nextPx < sw && nextPy >= 0 && nextPy < sh) {
-            if (lum[nextPy * sw + nextPx] < paperThreshold) {
-              bestR = r;
+          // Aproximar polígono cuadrilátero con Douglas-Peucker
+          const perimeter = polygonPerimeter(hull);
+          let quad = null;
+
+          for (const eps of [0.025, 0.035, 0.05, 0.07, 0.1]) {
+            const approx = approxPolyDP(hull, eps * perimeter);
+            if (approx.length === 4 && isConvexQuad(approx)) {
+              quad = approx;
               break;
+            }
+          }
+
+          // Si no es un cuadrilátero directo de 4 vértices, obtener la caja orientada mínima
+          if (!quad) {
+            quad = minAreaRect(hull);
+          }
+
+          if (quad && quad.length === 4) {
+            const ordered = orderCorners(quad);
+            const area = polygonArea(ordered);
+
+            if (area > (totalPixels * 0.04)) {
+              return ordered.map(pt => ({
+                x: Math.max(0, Math.min(width, pt.x / scale)),
+                y: Math.max(0, Math.min(height, pt.y / scale))
+              }));
             }
           }
         }
       }
-
-      boundaryPoints.push({
-        x: seedX + bestR * cosA,
-        y: seedY + bestR * sinA,
-        cosA: cosA,
-        sinA: sinA
-      });
     }
 
-    // Separar puntos en los 4 bordes del documento
-    // Izquierda (cosA < -0.3), Derecha (cosA > 0.3), Arriba (sinA < -0.3), Abajo (sinA > 0.3)
-    const leftPts = boundaryPoints.filter(p => p.cosA < -0.3 && Math.abs(p.sinA) < 0.88);
-    const rightPts = boundaryPoints.filter(p => p.cosA > 0.3 && Math.abs(p.sinA) < 0.88);
-    const topPts = boundaryPoints.filter(p => p.sinA < -0.3 && Math.abs(p.cosA) < 0.88);
-    const botPts = boundaryPoints.filter(p => p.sinA > 0.3 && Math.abs(p.cosA) < 0.88);
-
-    if (leftPts.length >= 4 && rightPts.length >= 4 && topPts.length >= 4 && botPts.length >= 4) {
-      // Ajustar las 4 líneas por regresión lineal / mínimos cuadrados
-      const lineLeft = fitLine(leftPts, 'v');   // x = m*y + c
-      const lineRight = fitLine(rightPts, 'v'); // x = m*y + c
-      const lineTop = fitLine(topPts, 'h');     // y = m*x + c
-      const lineBot = fitLine(botPts, 'h');     // y = m*x + c
-
-      // Intersectar las 4 líneas para obtener las esquinas exactas del trapezoide
-      const tl = intersectHV(lineTop, lineLeft);
-      const tr = intersectHV(lineTop, lineRight);
-      const br = intersectHV(lineBot, lineRight);
-      const bl = intersectHV(lineBot, lineLeft);
-
-      if (tl && tr && br && bl) {
-        const rawCorners = [tl, tr, br, bl];
-        const area = polygonArea(rawCorners);
-
-        // Validar que el polígono tenga un área razonable y forma válida
-        if (area > (sw * sh * 0.06) && isConvexQuad(rawCorners)) {
-          return rawCorners.map(pt => ({
-            x: Math.max(0, Math.min(width, pt.x / scale)),
-            y: Math.max(0, Math.min(height, pt.y / scale))
-          }));
-        }
-      }
-    }
-
-    // Fallback secundario: Envolvente convexa
-    const hull = convexHull(boundaryPoints);
-    if (hull.length >= 3) {
-      const perimeter = polygonPerimeter(hull);
-      for (const eps of [0.035, 0.05, 0.07, 0.1]) {
-        const approx = approxPolyDP(hull, eps * perimeter);
-        if (approx.length === 4 && isConvexQuad(approx)) {
-          return orderCorners(approx).map(pt => ({
-            x: Math.max(0, Math.min(width, pt.x / scale)),
-            y: Math.max(0, Math.min(height, pt.y / scale))
-          }));
-        }
-      }
-      const box = minAreaRect(hull);
-      if (box && box.length === 4) {
-        return orderCorners(box).map(pt => ({
-          x: Math.max(0, Math.min(width, pt.x / scale)),
-          y: Math.max(0, Math.min(height, pt.y / scale))
-        }));
-      }
-    }
-
+    // Fallback: Si no se detecta contorno válido, encuadre A4 centrado
     return getA4PresetCorners(width, height);
   }
 
-  // Ajuste de línea robusto (Mínimos cuadrados con rechazo de outliers)
-  function fitLine(points, type) {
-    if (type === 'v') {
-      // Línea vertical: x = m*y + c
-      let sumY = 0, sumX = 0, sumY2 = 0, sumYX = 0;
-      const n = points.length;
-      for (const p of points) {
-        sumY += p.y;
-        sumX += p.x;
-        sumY2 += p.y * p.y;
-        sumYX += p.y * p.x;
+  // Clausura morfológica (Dilatación seguida de Erosión)
+  function morphClose(mask, w, h, radius) {
+    const dilated = new Uint8Array(w * h);
+    const closed = new Uint8Array(w * h);
+
+    for (let y = radius; y < h - radius; y++) {
+      for (let x = radius; x < w - radius; x++) {
+        let maxVal = 0;
+        for (let dy = -radius; dy <= radius; dy += 2) {
+          for (let dx = -radius; dx <= radius; dx += 2) {
+            if (mask[(y + dy) * w + (x + dx)] === 1) {
+              maxVal = 1;
+              break;
+            }
+          }
+          if (maxVal === 1) break;
+        }
+        dilated[y * w + x] = maxVal;
       }
-      const denom = n * sumY2 - sumY * sumY;
-      const m = Math.abs(denom) > 1e-5 ? (n * sumYX - sumY * sumX) / denom : 0;
-      const c = (sumX - m * sumY) / n;
-      return { m, c, type: 'v' };
-    } else {
-      // Línea horizontal: y = m*x + c
-      let sumX = 0, sumY = 0, sumX2 = 0, sumXY = 0;
-      const n = points.length;
-      for (const p of points) {
-        sumX += p.x;
-        sumY += p.y;
-        sumX2 += p.x * p.x;
-        sumXY += p.x * p.y;
-      }
-      const denom = n * sumX2 - sumX * sumX;
-      const m = Math.abs(denom) > 1e-5 ? (n * sumXY - sumX * sumY) / denom : 0;
-      const c = (sumY - m * sumX) / n;
-      return { m, c, type: 'h' };
     }
+
+    for (let y = radius; y < h - radius; y++) {
+      for (let x = radius; x < w - radius; x++) {
+        let minVal = 1;
+        for (let dy = -radius; dy <= radius; dy += 2) {
+          for (let dx = -radius; dx <= radius; dx += 2) {
+            if (dilated[(y + dy) * w + (x + dx)] === 0) {
+              minVal = 0;
+              break;
+            }
+          }
+          if (minVal === 0) break;
+        }
+        closed[y * w + x] = minVal;
+      }
+    }
+
+    return closed;
   }
 
-  // Intersección de línea horizontal (y = mh*x + ch) y vertical (x = mv*y + cv)
-  function intersectHV(hLine, vLine) {
-    const mh = hLine.m, ch = hLine.c;
-    const mv = vLine.m, cv = vLine.c;
+  // Detección de componentes conectados (BFS)
+  function findConnectedComponents(binaryMask, w, h) {
+    const visited = new Uint8Array(w * h);
+    const blobs = [];
 
-    // y = mh*(mv*y + cv) + ch => y * (1 - mh*mv) = mh*cv + ch
-    const denom = 1 - mh * mv;
-    if (Math.abs(denom) < 1e-5) return null;
+    for (let y = 3; y < h - 3; y += 2) {
+      for (let x = 3; x < w - 3; x += 2) {
+        const idx = y * w + x;
+        if (binaryMask[idx] === 1 && visited[idx] === 0) {
+          const blobPixels = [];
+          const queue = [idx];
+          visited[idx] = 1;
+          let sumX = 0;
+          let sumY = 0;
 
-    const y = (mh * cv + ch) / denom;
-    const x = mv * y + cv;
+          while (queue.length > 0) {
+            const curr = queue.pop();
+            const cx = curr % w;
+            const cy = Math.floor(curr / w);
 
-    return { x, y };
+            blobPixels.push({ x: cx, y: cy });
+            sumX += cx;
+            sumY += cy;
+
+            const neighbors = [
+              curr - 1, curr + 1,
+              curr - w, curr + w
+            ];
+
+            for (const n of neighbors) {
+              if (n >= 0 && n < w * h && binaryMask[n] === 1 && visited[n] === 0) {
+                visited[n] = 1;
+                queue.push(n);
+              }
+            }
+          }
+
+          if (blobPixels.length >= 40) {
+            blobs.push({
+              area: blobPixels.length,
+              pixels: blobPixels,
+              sumX,
+              sumY
+            });
+          }
+        }
+      }
+    }
+
+    return blobs;
+  }
+
+  function extractContour(pixels, w, h) {
+    const grid = new Map();
+    pixels.forEach(p => grid.set(`${p.x},${p.y}`, true));
+
+    const contour = [];
+    pixels.forEach(p => {
+      if (!grid.has(`${p.x - 1},${p.y}`) || !grid.has(`${p.x + 1},${p.y}`) ||
+          !grid.has(`${p.x},${p.y - 1}`) || !grid.has(`${p.x},${p.y + 1}`)) {
+        contour.push(p);
+      }
+    });
+
+    return contour;
   }
 
   function getA4PresetCorners(width, height) {
