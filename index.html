@@ -106,6 +106,7 @@
         </div>
 
         <div class="crop-canvas-wrapper" id="crop-wrapper">
+          <div class="crop-tip-pill">✋ Arrastra las 4 esquinas para ajustar el encuadre exacto</div>
           <canvas id="crop-canvas"></canvas>
           <!-- Loupe / Magnifier glass for fine tuning -->
           <div id="loupe" class="loupe-preview hidden">
@@ -132,6 +133,13 @@
 
       <!-- SCREEN 3: ENHANCEMENT, FOCUS & FILTERS (ENFOQUE Y FILTROS) -->
       <section id="screen-filter" class="screen">
+        <div class="filter-top-bar">
+          <button id="btn-recrop" class="btn-secondary btn-sm" title="Reajustar el encuadre y esquinas">
+            <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M6 2v14a2 2 0 0 0 2 2h14"></path><path d="M18 22V8a2 2 0 0 0-2-2H2"></path></svg>
+            📐 Reajustar Encuadre
+          </button>
+        </div>
+
         <div class="filter-preview-wrapper">
           <canvas id="filter-canvas"></canvas>
         </div>
@@ -319,11 +327,11 @@
 
   </div>
 
-  <script src="scanner-core.js?v=9"></script>
-  <script src="app.js?v=9"></script>
+  <script src="scanner-core.js?v=10"></script>
+  <script src="app.js?v=10"></script>
   <script>
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('./sw.js?v=9').then(reg => {
+      navigator.serviceWorker.register('./sw.js?v=10').then(reg => {
         reg.update();
       }).catch(err => console.log('SW error:', err));
     }

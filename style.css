@@ -433,6 +433,28 @@ body, html {
   touch-action: none;
 }
 
+.crop-tip-pill {
+  position: absolute;
+  top: 14px;
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  color: #e0f2fe;
+  padding: 6px 14px;
+  border-radius: var(--radius-full);
+  font-size: 12px;
+  font-weight: 500;
+  z-index: 20;
+  pointer-events: none;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  animation: fadeInDown 0.4s ease;
+}
+
+@keyframes fadeInDown {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 #crop-canvas {
   max-width: 100%;
   max-height: 100%;
@@ -485,6 +507,20 @@ body, html {
 #screen-filter {
   background-color: var(--bg-main);
   padding-bottom: calc(16px + var(--safe-bottom));
+}
+
+.filter-top-bar {
+  padding: 8px 16px;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.btn-sm {
+  padding: 6px 12px;
+  font-size: 12.5px;
+  border-radius: var(--radius-sm);
 }
 
 .filter-preview-wrapper {

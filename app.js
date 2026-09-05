@@ -47,6 +47,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const valBrightness = document.getElementById('val-brightness');
   const btnAddMorePages = document.getElementById('btn-add-more-pages');
   const btnDoneFilter = document.getElementById('btn-done-filter');
+  const btnReCrop = document.getElementById('btn-recrop');
 
   // Live camera overlay elements
   const liveOverlayCanvas = document.getElementById('live-overlay-canvas');
@@ -725,6 +726,14 @@ document.addEventListener('DOMContentLoaded', () => {
     } else {
       badgePageCount.classList.add('hidden');
     }
+  }
+
+  if (btnReCrop) {
+    btnReCrop.addEventListener('click', () => {
+      goToScreen('crop');
+      renderCropCanvas();
+      showToast('Ajusta las esquinas del documento');
+    });
   }
 
   btnAddMorePages.addEventListener('click', () => {
