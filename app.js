@@ -157,39 +157,66 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!liveTrackingActive || activeScreen !== 'camera') return;
 
     if (cameraFeed.videoWidth && cameraFeed.videoHeight) {
-      // Ajustar dimensiones del canvas overlay al tamaño visible
       const rect = cameraFeed.getBoundingClientRect();
-      if (liveOverlayCanvas.width !== rect.width || liveOverlayCanvas.height !== rect.height) {
-        liveOverlayCanvas.width = rect.width;
-        liveOverlayCanvas.height = rect.height;
+      const sW = rect.width;
+      const sH = rect.height;
+
+      if (liveOverlayCanvas.width !== sW || liveOverlayCanvas.height !== sH) {
+        liveOverlayCanvas.width = sW;
+        liveOverlayCanvas.height = sH;
       }
 
-      // Procesar frame en resolución reducida (máx 240px para 20+ FPS)
-      const downW = 240;
-      const downH = Math.round((cameraFeed.videoHeight / cameraFeed.videoWidth) * downW);
+      // Calcular sub-rectángulo exacto de video visible por CSS object-fit: cover
+      const vW = cameraFeed.videoWidth;
+      const vH = cameraFeed.videoHeight;
+      const videoRatio = vW / vH;
+      const screenRatio = sW / sH;
+
+      let srcX = 0, srcY = 0, srcW = vW, srcH = vH;
+      if (screenRatio < videoRatio) {
+        // En modo vertical (portrait), el video se recorta en los lados izquierdo y derecho
+        srcW = vH * screenRatio;
+        srcX = (vW - srcW) / 2;
+      } else {
+        // El video se recorta arriba y abajo
+        srcH = vW / screenRatio;
+        srcY = (vH - srcH) / 2;
+      }
+
+      // Muestrear exactamente la región visible en pantalla en resolución optimizada
+      const downW = 280;
+      const downH = Math.round(downW * (sH / sW));
       liveOffscreenCanvas.width = downW;
       liveOffscreenCanvas.height = downH;
       const offCtx = liveOffscreenCanvas.getContext('2d');
-      offCtx.drawImage(cameraFeed, 0, 0, downW, downH);
+      offCtx.drawImage(cameraFeed, srcX, srcY, srcW, srcH, 0, 0, downW, downH);
 
       const frameData = offCtx.getImageData(0, 0, downW, downH);
       const rawCorners = ScannerCore.detectDocumentCorners(frameData);
 
       if (rawCorners && rawCorners.length === 4) {
-        // Escalar esquinas a coordenadas de la resolución completa de la cámara
-        const scaleX = cameraFeed.videoWidth / downW;
-        const scaleY = cameraFeed.videoHeight / downH;
-        const videoCorners = rawCorners.map(p => ({ x: p.x * scaleX, y: p.y * scaleY }));
+        // 1. Coordenadas de pantalla 1:1 exactas
+        const screenCorners = rawCorners.map(p => ({
+          x: (p.x / downW) * sW,
+          y: (p.y / downH) * sH
+        }));
+
+        // 2. Coordenadas de la foto original completa
+        const videoCorners = rawCorners.map(p => ({
+          x: srcX + (p.x / downW) * srcW,
+          y: srcY + (p.y / downH) * srcH
+        }));
+
         liveCorners = videoCorners;
 
-        // Suavizado EMA (Exponential Moving Average) para movimiento fluido sin temblores
+        // Suavizado EMA
         if (!liveCornersSmoothed) {
-          liveCornersSmoothed = videoCorners.map(p => ({ x: p.x, y: p.y }));
+          liveCornersSmoothed = screenCorners.map(p => ({ x: p.x, y: p.y }));
         } else {
-          const alpha = 0.45;
+          const alpha = 0.55;
           for (let i = 0; i < 4; i++) {
-            liveCornersSmoothed[i].x = liveCornersSmoothed[i].x * (1 - alpha) + videoCorners[i].x * alpha;
-            liveCornersSmoothed[i].y = liveCornersSmoothed[i].y * (1 - alpha) + videoCorners[i].y * alpha;
+            liveCornersSmoothed[i].x = liveCornersSmoothed[i].x * (1 - alpha) + screenCorners[i].x * alpha;
+            liveCornersSmoothed[i].y = liveCornersSmoothed[i].y * (1 - alpha) + screenCorners[i].y * alpha;
           }
         }
 
@@ -202,47 +229,22 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
 
-    // Programar siguiente frame cada ~70ms (14 FPS)
     setTimeout(() => {
       if (liveTrackingActive) {
         liveTrackingTimer = requestAnimationFrame(processLiveFrame);
       }
-    }, 65);
+    }, 55);
   }
 
-  function renderLiveOverlay(corners) {
+  function renderLiveOverlay(screenPts) {
     const ctx = liveOverlayCanvas.getContext('2d');
     const vw = liveOverlayCanvas.width;
     const vh = liveOverlayCanvas.height;
     ctx.clearRect(0, 0, vw, vh);
 
-    if (!corners || corners.length !== 4 || !cameraFeed.videoWidth) return;
+    if (!screenPts || screenPts.length !== 4) return;
 
-    // Mapear coordenadas de video a coordenadas de pantalla (object-fit: cover)
-    const videoW = cameraFeed.videoWidth;
-    const videoH = cameraFeed.videoHeight;
-    const videoAspect = videoW / videoH;
-    const screenAspect = vw / vh;
-
-    let renderW, renderH, offsetX, offsetY;
-    if (screenAspect > videoAspect) {
-      renderW = vw;
-      renderH = vw / videoAspect;
-      offsetX = 0;
-      offsetY = (vh - renderH) / 2;
-    } else {
-      renderH = vh;
-      renderW = vh * videoAspect;
-      offsetX = (vw - renderW) / 2;
-      offsetY = 0;
-    }
-
-    const screenPts = corners.map(p => ({
-      x: offsetX + (p.x / videoW) * renderW,
-      y: offsetY + (p.y / videoH) * renderH
-    }));
-
-    // Dibujar polígono semi-transparente en vivo
+    // Dibujar polígono semi-transparente en vivo directamente sobre la pantalla
     ctx.beginPath();
     ctx.moveTo(screenPts[0].x, screenPts[0].y);
     for (let i = 1; i < 4; i++) {
@@ -260,7 +262,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Dibujar esquinas iluminadas
     screenPts.forEach(pt => {
       ctx.beginPath();
-      ctx.arc(pt.x, pt.y, 10, 0, Math.PI * 2);
+      ctx.arc(pt.x, pt.y, 9, 0, Math.PI * 2);
       ctx.fillStyle = '#38bdf8';
       ctx.fill();
       ctx.strokeStyle = '#ffffff';
