@@ -761,7 +761,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   btnDoneFilter.addEventListener('click', () => {
     commitCurrentPage();
+    activePreviewIndex = scannedPages.length - 1;
     goToScreen('share');
+    showToast('Toca la vista previa para agrandar 🔍');
   });
 
   btnDocList.addEventListener('click', () => {

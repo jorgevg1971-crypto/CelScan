@@ -209,36 +209,43 @@
       <!-- SCREEN 4: DOCUMENT PREVIEW & SHARE/SAVE OPTIONS (GUARDAR Y COMPARTIR) -->
       <section id="screen-share" class="screen">
         
-        <!-- DOCUMENT PREVIEW CARD -->
+        <!-- DOCUMENT PREVIEW & QUALITY CHECK CARD -->
         <div class="share-doc-preview-card">
-          <div class="doc-header-info">
-            <input type="text" id="doc-title-input" value="Documento_Escaneado" class="doc-title-field">
+          <div class="preview-card-header">
+            <span class="preview-badge-label">🔍 REVISIÓN DE CALIDAD</span>
             <span id="doc-pages-info" class="doc-pages-tag">1 Página(s)</span>
+          </div>
+
+          <div class="doc-header-info">
+            <label for="doc-title-input" class="doc-title-label">Nombre:</label>
+            <input type="text" id="doc-title-input" value="Documento_Escaneado" class="doc-title-field">
           </div>
 
           <!-- Featured Large Page Preview for Quality Inspection -->
           <div class="featured-preview-container" id="featured-preview-container">
-            <div class="featured-preview-wrapper" id="btn-open-preview" title="Toca para ver en pantalla completa y revisar la calidad">
+            <div class="featured-preview-wrapper" id="btn-open-preview" title="Toca para agrandar y ver en pantalla completa">
               <img id="featured-preview-img" src="" alt="Vista previa del documento">
               <div class="preview-zoom-badge">
-                <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="11" y1="8" x2="11" y2="14"></line><line x1="8" y1="11" x2="14" y2="11"></line></svg>
-                Toca para ampliar y revisar texto
+                <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2.5" fill="none"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="11" y1="8" x2="11" y2="14"></line><line x1="8" y1="11" x2="14" y2="11"></line></svg>
+                TOCA AQUÍ PARA AGRANDAR Y REVISAR TEXTO
               </div>
             </div>
 
+            <!-- Big Primary Enlarge Button -->
+            <button id="btn-quick-preview" class="btn-enlarge-giant" title="Agrandar documento a pantalla completa con zoom">
+              <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2.5" fill="none"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="11" y1="8" x2="11" y2="14"></line><line x1="8" y1="11" x2="14" y2="11"></line></svg>
+              <span>🔍 Agrandar y Revisar Documento</span>
+            </button>
+
             <!-- Quick Document Review Action Buttons -->
             <div class="preview-actions-strip">
-              <button id="btn-quick-preview" class="btn-preview-action" title="Ver en pantalla completa con zoom">
-                <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-                Ampliar
-              </button>
               <button id="btn-rescan-current" class="btn-preview-action rescan-btn" title="Re-escanear esta hoja si salió borrosa o mal recortada">
                 <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
-                Re-escanear
+                Re-escanear Hoja
               </button>
-              <button id="btn-add-page-share" class="btn-preview-action" title="Añadir otra página al documento">
+              <button id="btn-add-page-share" class="btn-preview-action add-btn" title="Añadir otra página al documento">
                 <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-                + Página
+                + Añadir Otra Hoja
               </button>
             </div>
           </div>
@@ -389,11 +396,11 @@
 
   </div>
 
-  <script src="scanner-core.js?v=11"></script>
-  <script src="app.js?v=11"></script>
+  <script src="scanner-core.js?v=12"></script>
+  <script src="app.js?v=12"></script>
   <script>
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('./sw.js?v=11').then(reg => {
+      navigator.serviceWorker.register('./sw.js?v=12').then(reg => {
         reg.update();
       }).catch(err => console.log('SW error:', err));
     }
