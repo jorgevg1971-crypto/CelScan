@@ -927,6 +927,13 @@ body, html {
   color: #fff;
   width: 38px;
   height: 38px;
+  border-radius: var(--radius-full);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
 .modal-pan-tip {
   background: rgba(2, 132, 199, 0.25);
   border-bottom: 1px solid rgba(56, 189, 248, 0.3);

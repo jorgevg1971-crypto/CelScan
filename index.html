@@ -9,7 +9,8 @@
   <meta name="apple-mobile-web-app-title" content="DocScan">
   <title>Escáner Móvil Pro - Android & iPhone</title>
   <link rel="manifest" href="manifest.json">
-  <link rel="stylesheet" href="style.css?v=14">
+  <style>.hidden { display: none !important; }</style>
+  <link rel="stylesheet" href="style.css?v=15">
   <!-- jsPDF for PDF generation -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 </head>
@@ -23,7 +24,7 @@
       </button>
       <div class="header-title-container">
         <h1 id="header-title">Escáner Móvil Pro</h1>
-        <span id="header-subtitle" class="badge">v14 · Android & iOS</span>
+        <span id="header-subtitle" class="badge">v15 · Android & iOS</span>
       </div>
       <div class="header-actions">
         <button id="btn-info" class="icon-btn" title="Información">
@@ -408,13 +409,13 @@
 
   </div>
 
-  <script src="scanner-core.js?v=14"></script>
-  <script src="app.js?v=14"></script>
+  <script src="scanner-core.js?v=15"></script>
+  <script src="app.js?v=15"></script>
   <script>
     if ('caches' in window) {
       caches.keys().then(keys => {
         keys.forEach(k => {
-          if (k !== 'docscan-v14') caches.delete(k);
+          if (k !== 'docscan-v15') caches.delete(k);
         });
       });
     }
@@ -422,7 +423,7 @@
       navigator.serviceWorker.getRegistrations().then(regs => {
         regs.forEach(r => r.update());
       });
-      navigator.serviceWorker.register('./sw.js?v=14').then(reg => {
+      navigator.serviceWorker.register('./sw.js?v=15').then(reg => {
         reg.update();
       }).catch(err => console.log('SW error:', err));
     }
